@@ -1,0 +1,38 @@
+[package]
+name = "akkhor-pdf-editor"
+version = "0.1.0"
+description = "Free, open-source, offline Bangla & English PDF editor"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/shaonkhalifa/akkhor-pdf-editor"
+authors = ["Akkhor PDF Editor contributors"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "akkhor_pdf_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mupdf = { version = "0.8.0", default-features = false, features = ["html", "img", "base14-fonts"] }
+anyhow = "1"
+tempfile = "3"
+
+[dev-dependencies]
+png = "0.17"
+
+# Build MuPDF (C code) optimised and without debug symbols, even in dev builds.
+# Its Debug configuration compiles very slowly on Windows, and the app needs
+# MuPDF to be fast to meet the SRS performance targets during development.
+[profile.dev.package.mupdf-sys]
+opt-level = 2
+debug = false
