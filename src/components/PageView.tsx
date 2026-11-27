@@ -7,6 +7,8 @@ import { useApp } from "../store";
 
 interface Props {
   docId: number;
+  /** Document version: pages are redrawn when it changes. */
+  version: number;
   index: number;
   /** Page size in points. */
   size: [number, number];
@@ -18,7 +20,7 @@ interface Props {
   onGoTo: (page: number) => void;
 }
 
-function PageView({ docId, index, size, scale, top, hits, currentHit, onGoTo }: Props) {
+function PageView({ docId, version, index, size, scale, top, hits, currentHit, onGoTo }: Props) {
   const lang = useApp((s) => s.lang);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
@@ -34,7 +36,7 @@ function PageView({ docId, index, size, scale, top, hits, currentHit, onGoTo }: 
     const dpr = window.devicePixelRatio || 1;
     const deviceScale = Math.min(scale * dpr, 6);
     const timer = window.setTimeout(() => {
-      renderPage(docId, index, deviceScale)
+      renderPage(docId, index, deviceScale, version)
         .then((bmp) => {
           const c = canvasRef.current;
           if (cancelled || !c) {
@@ -53,9 +55,9 @@ function PageView({ docId, index, size, scale, top, hits, currentHit, onGoTo }: 
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [docId, index, scale]);
+  }, [docId, index, scale, version]);
 
-  // Text and links do not depend on zoom; load once.
+  // Text and links do not depend on zoom; load once per version.
   useEffect(() => {
     let cancelled = false;
     pageText(docId, index)
@@ -67,17 +69,19 @@ function PageView({ docId, index, size, scale, top, hits, currentHit, onGoTo }: 
     return () => {
       cancelled = true;
     };
-  }, [docId, index]);
+  }, [docId, index, version]);
 
-  // Stretch each invisible text span so it covers its line exactly.
+  // Stretch each invisible text span so it covers its line exactly, turned to
+  // the line's writing direction (text on rotated pages runs up or down).
   useLayoutEffect(() => {
     const root = textRef.current;
     if (!root) return;
     for (const el of Array.from(root.children) as HTMLElement[]) {
+      const turn = el.dataset.angle && el.dataset.angle !== "0" ? `rotate(${el.dataset.angle}deg) ` : "";
       el.style.transform = "";
       const target = Number(el.dataset.w);
-      const natural = el.getBoundingClientRect().width;
-      if (natural > 0 && target > 0) el.style.transform = `scaleX(${target / natural})`;
+      const natural = el.offsetWidth;
+      el.style.transform = natural > 0 && target > 0 ? `${turn}scaleX(${target / natural})` : turn;
     }
   }, [lines, scale]);
 
@@ -95,13 +99,15 @@ function PageView({ docId, index, size, scale, top, hits, currentHit, onGoTo }: 
 
       <div className="text-layer" ref={textRef}>
         {lines?.map((l, i) => {
-          const h = (l.rect[3] - l.rect[1]) * scale;
+          const [x0, y0, x1, y1] = l.rect.map((v) => v * scale);
+          const vertical = l.angle === 90 || l.angle === 270;
+          // Line height across the text, length along it.
+          const h = vertical ? x1 - x0 : y1 - y0;
+          const len = vertical ? y1 - y0 : x1 - x0;
+          // The span's top-left corner, before turning, sits at the start of the line.
+          const [left, top] = l.angle === 90 ? [x1, y0] : l.angle === 180 ? [x1, y1] : l.angle === 270 ? [x0, y1] : [x0, y0];
           return (
-            <span
-              key={i}
-              data-w={(l.rect[2] - l.rect[0]) * scale}
-              style={{ left: l.rect[0] * scale, top: l.rect[1] * scale, height: h, fontSize: h * 0.88 }}
-            >
+            <span key={i} data-w={len} data-angle={l.angle} style={{ left, top, height: h, fontSize: h * 0.88 }}>
               {l.text}
             </span>
           );

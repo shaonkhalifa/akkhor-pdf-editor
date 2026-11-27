@@ -4,13 +4,15 @@
 // pages plus one ahead and behind), so a 2,000-page file scrolls as smoothly
 // as a 2-page one.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { save as saveDialog, message } from "@tauri-apps/plugin-dialog";
-import { PX_PER_PT, saveCopy, searchPdf } from "../api";
+import { PX_PER_PT, searchPdf } from "../api";
 import { num, t } from "../i18n";
+import { deletePages, redo, rotatePages, save, saveAs, undo } from "../pageTools";
 import { printDocument } from "../print";
 import { useApp, type Tab } from "../store";
+import Icon from "./Icon";
 import PageView from "./PageView";
 import Sidebar from "./Sidebar";
+import SplitDialog from "./SplitDialog";
 
 const GAP = 16; // px between pages
 const PAD = 24; // px around the page column
@@ -28,7 +30,8 @@ export default function DocView({ tab }: { tab: Tab }) {
   const [query, setQuery] = useState(tab.query);
   const [searching, setSearching] = useState(false);
   const [printing, setPrinting] = useState<number | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [splitting, setSplitting] = useState(false);
+  const setMerge = useApp((s) => s.setMerge);
 
   const maxW = useMemo(() => Math.max(...doc.pages.map((p) => p[0])), [doc.pages]);
 
@@ -189,35 +192,37 @@ export default function DocView({ tab }: { tab: Tab }) {
     }
   };
 
-  const saveAs = async () => {
-    const dest = await saveDialog({
-      defaultPath: doc.name,
-      filters: [{ name: t(lang, "pdfFiles"), extensions: ["pdf"] }],
-    });
-    if (!dest) return;
-    try {
-      await saveCopy(doc.id, dest);
-      setToast(t(lang, "saved"));
-      window.setTimeout(() => setToast(null), 2000);
-    } catch (e) {
-      await message(String(e), { kind: "error" });
-    }
-  };
-
   // Keyboard shortcuts for this document.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement)?.tagName === "INPUT";
-      if (e.ctrlKey && e.key.toLowerCase() === "f") {
+      const target = e.target as HTMLElement;
+      const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+      // Another window (a dialog) is open: leave its keys alone.
+      if (document.querySelector(".overlay")) return;
+      const key = e.key.toLowerCase();
+      if (e.ctrlKey && !typing && key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo(doc.id);
+      } else if (e.ctrlKey && !typing && (key === "y" || (key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        redo(doc.id);
+      } else if (e.ctrlKey && key === "s") {
+        e.preventDefault();
+        if (e.shiftKey) saveAs(doc.id);
+        else save(doc.id);
+      } else if (!typing && e.key === "Delete" && target?.closest(".sidebar")) {
+        e.preventDefault();
+        deletePages(doc.id);
+      } else if (e.ctrlKey && !typing && (key === "]" || key === "[") && target?.closest(".sidebar")) {
+        e.preventDefault();
+        rotatePages(doc.id, key === "]" ? 90 : -90);
+      } else if (e.ctrlKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
       } else if (e.ctrlKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         print();
-      } else if (e.ctrlKey && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        saveAs();
       } else if (e.ctrlKey && (e.key === "=" || e.key === "+")) {
         e.preventDefault();
         stepZoom(1);
@@ -260,6 +265,20 @@ export default function DocView({ tab }: { tab: Tab }) {
           onClick={() => update(doc.id, { sidebar: tab.sidebar ? null : "pages" })}
         >
           ☰
+        </button>
+        <span className="sep" />
+        <button className="tool icon" title={`${t(lang, "undo")} (Ctrl+Z)`} aria-label={t(lang, "undo")} disabled={!doc.can_undo} onClick={() => undo(doc.id)}>
+          <Icon name="undo" />
+        </button>
+        <button className="tool icon" title={`${t(lang, "redo")} (Ctrl+Y)`} aria-label={t(lang, "redo")} disabled={!doc.can_redo} onClick={() => redo(doc.id)}>
+          <Icon name="redo" />
+        </button>
+        <button
+          className={doc.dirty ? "tool text save dirty" : "tool text save"}
+          title={`${t(lang, "save")} (Ctrl+S)`}
+          onClick={() => save(doc.id)}
+        >
+          <Icon name="save" size={16} /> {t(lang, "save")}
         </button>
         <span className="sep" />
         <form
@@ -331,10 +350,17 @@ export default function DocView({ tab }: { tab: Tab }) {
         </form>
 
         <span className="sep" />
+        <button className="tool text" onClick={() => setSplitting(true)} title={t(lang, "splitTitle")}>
+          <Icon name="split" size={16} /> {t(lang, "split")}
+        </button>
+        <button className="tool text" onClick={() => setMerge([doc.path])} title={t(lang, "mergeTitle")}>
+          <Icon name="merge" size={16} /> {t(lang, "merge")}
+        </button>
+        <span className="sep" />
         <button className="tool text" onClick={print} disabled={printing !== null} title="Ctrl+P">
           {t(lang, "print")}
         </button>
-        <button className="tool text" onClick={saveAs} title="Ctrl+S">
+        <button className="tool text" onClick={() => saveAs(doc.id)} title="Ctrl+Shift+S">
           {t(lang, "saveAs")}
         </button>
       </div>
@@ -347,6 +373,7 @@ export default function DocView({ tab }: { tab: Tab }) {
               <PageView
                 key={i}
                 docId={doc.id}
+                version={doc.version}
                 index={i}
                 size={doc.pages[i]}
                 scale={scale}
@@ -371,7 +398,7 @@ export default function DocView({ tab }: { tab: Tab }) {
           </div>
         </div>
       )}
-      {toast && <div className="toast">{toast}</div>}
+      {splitting && <SplitDialog doc={doc} onClose={() => setSplitting(false)} />}
     </div>
   );
 }

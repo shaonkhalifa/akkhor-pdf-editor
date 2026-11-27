@@ -4,6 +4,7 @@ import { clearRecentFiles, recentFiles } from "../api";
 import { t } from "../i18n";
 import { openPath, pickAndOpen } from "../open";
 import { useApp } from "../store";
+import Icon from "./Icon";
 
 function splitPath(p: string) {
   const parts = p.split(/[\\/]/);
@@ -14,6 +15,7 @@ function splitPath(p: string) {
 export default function Home({ dragging }: { dragging: boolean }) {
   const lang = useApp((s) => s.lang);
   const setScreen = useApp((s) => s.setScreen);
+  const setMerge = useApp((s) => s.setMerge);
   const [recent, setRecent] = useState<string[]>([]);
 
   useEffect(() => {
@@ -27,9 +29,14 @@ export default function Home({ dragging }: { dragging: boolean }) {
           <div className="drop-icon" aria-hidden="true">
             PDF
           </div>
-          <button className="primary big" onClick={() => pickAndOpen()}>
-            {t(lang, "openPdf")}
-          </button>
+          <div className="row center">
+            <button className="primary big" onClick={() => pickAndOpen()}>
+              {t(lang, "openPdf")}
+            </button>
+            <button className="big" onClick={() => setMerge([])}>
+              <Icon name="merge" size={18} /> {t(lang, "merge")}
+            </button>
+          </div>
           <p className="muted">{dragging ? t(lang, "dropNow") : t(lang, "dropHint")}</p>
           <p className="muted small">{t(lang, "shortcuts")}</p>
         </div>
