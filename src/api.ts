@@ -186,3 +186,71 @@ export const listSignatures = () => invoke<SavedSignature[]>("list_signatures");
 export const saveSignature = (label: string, dataUrl: string) => invoke<SavedSignature>("save_signature", { label, dataUrl });
 
 export const deleteSignature = (id: string) => invoke<void>("delete_signature", { id });
+
+// --- Text editing (Phase 5) ---------------------------------------------------
+
+export interface FontOption {
+  name: string;
+  script: "bangla" | "english";
+  source: "bundled" | "builtin" | "system";
+  serif: boolean;
+}
+
+/** A block of text on a page, ready to edit. */
+export interface TextBlock {
+  text: string;
+  rect: [number, number, number, number];
+  lines: [number, number, number, number][];
+  /** Baseline of the first line: [left, y]. */
+  origin: [number, number];
+  size: number;
+  line_height: number;
+  max_width: number;
+  font: string;
+  bold: boolean;
+  italic: boolean;
+  color: string;
+  bangla_font: string;
+  english_font: string;
+  has_bangla: boolean;
+  readable: boolean;
+}
+
+export type Align = "left" | "center" | "right";
+
+export interface StyleChoice {
+  bangla_font: string;
+  english_font: string;
+  size: number;
+  line_height: number | null;
+  bold: boolean;
+  italic: boolean;
+  color: [number, number, number];
+  align: Align;
+}
+
+export type Fit = "check" | "shrink" | "overflow";
+
+export interface TextPlacement {
+  left: number;
+  width: number;
+  baseline: number | null;
+  top: number | null;
+  max_height: number | null;
+  remove: [number, number, number, number][];
+  fit: Fit;
+}
+
+export type MarkupKind = "highlight" | "underline" | "strike";
+
+export const fontList = () => invoke<FontOption[]>("font_list");
+
+export const textBlocks = (id: number, page: number) => invoke<TextBlock[]>("text_blocks", { id, page });
+
+export const placeText = (id: number, page: number, text: string, style: StyleChoice, placement: TextPlacement) =>
+  invoke<DocInfo>("place_text", { id, page, text, style, placement });
+
+export const markupText = (id: number, page: number, markup: MarkupKind, rect: number[], color: [number, number, number]) =>
+  invoke<DocInfo>("markup_text", { id, page, markup, rect, color });
+
+export const redactArea = (id: number, page: number, rect: number[]) => invoke<DocInfo>("redact_area", { id, page, rect });

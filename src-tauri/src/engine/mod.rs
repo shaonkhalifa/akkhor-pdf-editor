@@ -11,4 +11,5 @@ pub mod render;
 pub mod script;
 pub mod selftest;
 pub mod signatures;
+pub mod textedit;
 pub mod viewer;

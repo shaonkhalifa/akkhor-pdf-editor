@@ -272,6 +272,31 @@ input[type="text"], input[type="number"], input[type="search"], input[type="pass
 .custom-stamp .stamp-preview { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 .custom-stamp .stamp-canvas { max-height: 110px; }
 
+/* ---- Text editing (Phase 5) ---- */
+.text-block { position: absolute; border: 1px dashed rgba(31, 111, 235, 0.55); background: transparent; padding: 0; border-radius: 2px; cursor: text; z-index: 3; }
+.text-block:hover { background: rgba(31, 111, 235, 0.1); border-style: solid; }
+.text-block.unreadable { border-color: rgba(198, 40, 40, 0.7); }
+.tool-layer { position: absolute; inset: 0; z-index: 4; cursor: crosshair; touch-action: none; }
+.tool-layer.addtext { cursor: text; }
+.drag-rect { position: absolute; pointer-events: none; }
+.drag-rect.highlight { background: rgba(255, 214, 0, 0.35); }
+.drag-rect.underline, .drag-rect.strike { background: rgba(31, 111, 235, 0.12); outline: 1px dashed var(--accent); }
+.drag-rect.redact { background: rgba(0, 0, 0, 0.55); outline: 2px solid #000; }
+.edit-cover { position: absolute; background: #fff; z-index: 5; }
+.text-edit { position: absolute; z-index: 6; }
+.text-edit textarea { display: block; width: 100%; resize: none; overflow: hidden; border: 1.5px solid var(--accent); border-radius: 2px; background: rgba(255, 255, 255, 0.96); padding: 0; margin: 0; outline: none; white-space: pre-wrap; min-height: 1.4em; min-width: 60px; caret-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.text-edit .width-handle { position: absolute; top: 0; right: -6px; width: 10px; height: 100%; cursor: ew-resize; }
+.text-edit .width-handle::after { content: ""; position: absolute; top: 50%; left: 3px; width: 4px; height: 18px; margin-top: -9px; border-radius: 2px; background: var(--accent); }
+.text-style-bar { position: absolute; z-index: 7; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); display: flex; flex-direction: column; gap: 4px; width: max-content; max-width: 600px; }
+.text-style-bar select { font: inherit; padding: 3px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: inherit; max-width: 170px; }
+.text-style-bar input[type="color"] { width: 30px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; }
+.row.tight { gap: 4px; margin-top: 0; flex-wrap: wrap; }
+.size-field { display: flex; align-items: center; gap: 2px; font-size: 0.8rem; }
+.size-field input { width: 58px; }
+.warn { color: var(--bad); display: inline-block; max-width: 380px; white-space: normal; }
+.mode-banner { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
+.banner-done { background: var(--accent-ink); color: var(--accent); border: none; padding: 2px 12px; border-radius: 999px; font-weight: 600; }
+
 /* ---- Printing: only the prepared page images are printed ---- */
 #print-root { display: none; }
 @media print {

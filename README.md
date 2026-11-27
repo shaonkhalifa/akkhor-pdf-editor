@@ -6,14 +6,27 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Everything happens on your own PC. The app contains **no network code**, so your files never leave your computer.
 - Free forever, licensed under **AGPL-3.0-or-later**.
 
-> **Status: Phase 4 of 8 — viewer, page tools, pictures and signatures.**
-> Open, read, search and print PDFs; rotate, delete, reorder, split and merge
-> pages; add pictures, stamps and signatures. Text editing comes in Phase 5.
-> See the [roadmap](#roadmap).
+> **Status: Phase 5 of 8 — Bangla and English text editing.** Edit existing
+> text, add text boxes, highlight and redact; plus the viewer, page tools,
+> pictures and signatures. See the [roadmap](#roadmap).
 
-## What you can do (v0.4)
+## What you can do (v0.5)
 
-### Pictures, stamps and signatures (new in v0.4)
+### Text editing (new in v0.5)
+
+- **Edit text**: click a block of text, change it, Apply (Ctrl+Enter). The old text is removed (only the text: pictures and lines under it stay) and the new text is shaped by HarfBuzz, so conjuncts such as ক্ষ্ম and vowel signs such as ি and ে come out right. It reads back as the exact Unicode you typed, so copy and search work.
+- Bangla and English in one line: each character gets the right font automatically.
+- Font, size, colour, bold, italic and alignment. The original font is matched (SRS 6.3): the same font if it is installed (Arial, Times New Roman, Calibri, SolaimanLipi, Kalpurush, Nikosh…), else a same-width substitute (Times, Helvetica/Arial widths) or a bundled Bangla font.
+- Longer text wraps inside its box. A single line may grow to the page margin; when a paragraph no longer fits, the app asks: shrink the text to fit, or let it run past the box.
+- **Add text**: click anywhere on a page to type a new text box; drag its right edge to set the width.
+- **Highlight, underline, strikethrough**: drag over text.
+- **Redact**: drag over an area to remove text, pictures and lines there for good, under a black box. The removed words are not in the saved file at all.
+- Text that was not read correctly (old Bijoy fonts or broken font maps) is marked so you can check and retype it. Converting Bijoy comes in Phase 7.
+- Every change can be undone (Ctrl+Z).
+
+Known limits: one style per block (a block with mixed bold and normal words becomes all one style); text on pages turned 90° can't be edited yet; Bangla has no italic font, so italic applies to English only.
+
+### Pictures, stamps and signatures
 
 - Insert PNG, JPG or WebP pictures. Very large photos are shrunk automatically (longest side 2400 px), so the PDF stays small.
 - Before placing: drag to move, drag the corner to resize (keeps the shape), drag the round handle to turn (snaps to straight angles; Shift for 15° steps), set opacity for logos and watermarks. Enter places it, Esc cancels, arrow keys nudge.
@@ -127,6 +140,7 @@ src-tauri/src/engine/    PDF engine (Rust)
   pages.rs               page tools: rotate, delete, reorder, insert, split, merge
   images.rs              pictures: shrink, place (rotation, opacity), find, delete, replace
   signatures.rs          "My signatures", encrypted with Windows DPAPI
+  textedit.rs            text blocks, wrapping, replace/add text, highlight, redact
   edit.rs                replace text in an existing PDF (spike)
   render.rs              page → PNG
   selftest.rs            SRS 6.4 shaping check + edit spike
@@ -140,8 +154,8 @@ scripts/                 helper scripts (no-network check)
 1. Setup, shaping test and text-edit spike ✅
 2. PDF viewer and printing ✅
 3. Page tools (merge, split, rotate, delete, reorder) ✅
-4. **Images and signatures** ✅ ← you are here
-5. Text editing, Bangla and English (core feature)
+4. Images and signatures ✅
+5. **Text editing, Bangla and English (core feature)** ✅ ← you are here
 6. Create, convert and forms
 7. Bijoy → Unicode and OCR
 8. (Later) Digital certificate signatures

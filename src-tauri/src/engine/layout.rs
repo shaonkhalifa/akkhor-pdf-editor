@@ -12,15 +12,17 @@
 //! one-to-one, which loses both. `/ActualText` is the PDF standard's answer and
 //! is honoured by Adobe Reader, Chrome and MuPDF.
 //!
-//! Phase 1 lays every line out on one row (no wrapping). Wrapping long text
-//! inside a box is Phase 5 work (FR-6.12).
+//! Every line is laid out on its own row. Text editing (Phase 5) wraps long
+//! text itself, by measuring shaped text, before calling this, so the tagging
+//! below always sees one row per line.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use mupdf::pdf::PdfDocument;
 use mupdf::{Buffer, Document, DocumentWriter, Matrix};
+use serde::{Deserialize, Serialize};
 
 use super::fonts::{BanglaFont, Coverage};
 use super::script::{split_runs, Script};
@@ -152,7 +154,139 @@ pub fn lines_to_pdf(lines: &[&str], opts: &LayoutOptions, fonts_dir: &Path) -> R
     let font = &opts.bangla_font;
     let coverage = Coverage::load(&fonts_dir.join(font.regular))?;
     let (html, spans) = build_html(lines, opts, &coverage, fonts_dir);
+    run_html(&html, spans, opts.page_width, opts.page_height, opts.font_size, true)
+}
 
+/// Font files of one family. Missing styles fall back to the regular file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Faces {
+    pub regular: PathBuf,
+    pub bold: Option<PathBuf>,
+    pub italic: Option<PathBuf>,
+    pub bold_italic: Option<PathBuf>,
+}
+
+/// The font used for English (and other non-Bangla) text.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EnglishFace {
+    /// MuPDF's built-in fonts, which have the same widths as the standard PDF
+    /// fonts: "serif" (Times), "sans-serif" (Helvetica/Arial), "monospace" (Courier).
+    Generic { css: String },
+    Files { faces: Faces },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Align {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// How a block of text looks (SRS FR-6.4).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Style {
+    pub bangla: Faces,
+    pub english: EnglishFace,
+    /// Font size in points.
+    pub size: f32,
+    /// Distance between baselines, in points.
+    pub line_height: f32,
+    pub bold: bool,
+    pub italic: bool,
+    pub color: [u8; 3],
+    pub align: Align,
+}
+
+fn url_of(p: &Path) -> String {
+    let full = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    full.to_string_lossy().replace('\\', "/").replace('\'', "%27")
+}
+
+fn font_faces(css: &mut String, family: &str, faces: &Faces) {
+    let variants = [
+        ("normal", "normal", Some(&faces.regular)),
+        ("bold", "normal", faces.bold.as_ref()),
+        ("normal", "italic", faces.italic.as_ref()),
+        ("bold", "italic", faces.bold_italic.as_ref().or(faces.bold.as_ref())),
+    ];
+    for (weight, style, file) in variants {
+        if let Some(file) = file {
+            let _ = writeln!(
+                css,
+                "@font-face {{ font-family: '{family}'; font-weight: {weight}; font-style: {style}; src: url('{}'); }}",
+                url_of(file)
+            );
+        }
+    }
+}
+
+/// HTML for already-broken `lines` in one style, `width` points wide. An
+/// empty line is a blank line.
+pub fn styled_html(lines: &[String], style: &Style, width: f32, bangla: &Coverage) -> (String, Vec<Vec<Span>>) {
+    let mut css = String::new();
+    font_faces(&mut css, "AkkhorBangla", &style.bangla);
+    let english = match &style.english {
+        EnglishFace::Generic { css } => css.clone(),
+        EnglishFace::Files { faces } => {
+            font_faces(&mut css, "AkkhorEnglish", faces);
+            "'AkkhorEnglish'".to_string()
+        }
+    };
+    let [r, g, b] = style.color;
+    let _ = write!(
+        css,
+        "@page {{ margin: 0; }}\n\
+         body {{ margin: 0; width: {width}pt; font-size: {s}pt; line-height: {lh}pt; font-weight: {w}; font-style: {i}; color: #{r:02x}{g:02x}{b:02x}; }}\n\
+         p {{ margin: 0; white-space: pre; text-align: {a}; }}\n\
+         p.blank {{ height: {lh}pt; }}\n\
+         .bn {{ font-family: 'AkkhorBangla'; }}\n\
+         .en {{ font-family: {english}; }}\n",
+        s = style.size,
+        lh = style.line_height,
+        w = if style.bold { "bold" } else { "normal" },
+        i = if style.italic { "italic" } else { "normal" },
+        a = match style.align {
+            Align::Left => "left",
+            Align::Center => "center",
+            Align::Right => "right",
+        },
+    );
+    let mut body = String::new();
+    let mut all = Vec::with_capacity(lines.len());
+    for line in lines {
+        if line.trim().is_empty() {
+            body.push_str("<p class=\"blank\"></p>\n");
+            all.push(Vec::new());
+            continue;
+        }
+        let spans = classes_for_line(line, bangla);
+        body.push_str("<p>");
+        for (class, text) in &spans {
+            let _ = write!(body, "<span class=\"{class}\">{}</span>", escape_html(text));
+        }
+        body.push_str("</p>\n");
+        all.push(spans);
+    }
+    let html = format!(
+        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><style>\n{css}</style></head>\n<body>\n{body}</body></html>\n"
+    );
+    (html, all)
+}
+
+/// Lay out `lines` in `style` on a page `width` x `height` points, as PDF.
+/// With `tag`, every run carries its Unicode text (needed for anything that
+/// goes into the user's PDF; measuring does not need it).
+pub fn styled_pdf(lines: &[String], style: &Style, width: f32, height: f32, tag: bool) -> Result<Vec<u8>> {
+    let coverage = Coverage::load(&style.bangla.regular)?;
+    let (html, spans) = styled_html(lines, style, width, &coverage);
+    run_html(&html, spans, width, height, style.size, tag)
+}
+
+/// Let MuPDF lay out an HTML page and write it as PDF.
+fn run_html(html: &str, spans: Vec<Vec<Span>>, width: f32, height: f32, font_size: f32, tag: bool) -> Result<Vec<u8>> {
     // MuPDF reads the HTML from a file; the PDF it writes goes next to it.
     let work = tempfile::tempdir().context("creating temp folder")?;
     let html_path = work.path().join("page.html");
@@ -160,7 +294,7 @@ pub fn lines_to_pdf(lines: &[&str], opts: &LayoutOptions, fonts_dir: &Path) -> R
     let pdf_path = work.path().join("out.pdf");
 
     let mut doc = Document::open(&mupdf_path(&html_path)?).context("opening HTML with MuPDF")?;
-    doc.layout(opts.page_width, opts.page_height, opts.font_size)?;
+    doc.layout(width, height, font_size)?;
     {
         let mut writer = DocumentWriter::new(&mupdf_path(&pdf_path)?, "pdf", "")?;
         for i in 0..doc.page_count()? {
@@ -173,6 +307,9 @@ pub fn lines_to_pdf(lines: &[&str], opts: &LayoutOptions, fonts_dir: &Path) -> R
         // Dropping the writer closes the file.
     }
     let bytes = std::fs::read(&pdf_path).context("reading generated PDF")?;
+    if !tag {
+        return Ok(bytes);
+    }
     let runs: Vec<Span> = spans.into_iter().flatten().filter(|(_, t)| !t.is_empty()).collect();
     add_actual_text(&bytes, &runs)
 }

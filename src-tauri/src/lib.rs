@@ -16,7 +16,10 @@ use engine::fonts::{default_bangla, dev_fonts_dir};
 use engine::selftest::{check_all_fonts, run_edit_spike, FontCheck, SpikeResult};
 use engine::images::{self, PageImage, Placement};
 use engine::pages::{self, MergeInput};
+use engine::fonts::FontOption;
+use engine::layout::{Align, Style};
 use engine::signatures::{self, SavedSignature};
+use engine::textedit::{Markup, TextBlock, TextPlacement};
 use engine::viewer::{DocInfo, PageEdit, PageLink, SearchHit, TextLine, Viewer};
 
 /// PDFs produced by the last self-test, kept in memory (never written to disk).
@@ -439,6 +442,87 @@ async fn delete_signature(app: AppHandle, id: String) -> Result<(), String> {
     blocking(move || signatures::delete(&dir, &id)).await
 }
 
+// ---------------------------------------------------------------------------
+// Text editing (SRS Module 6)
+// ---------------------------------------------------------------------------
+
+/// Fonts the user can choose for text (bundled, built-in and installed).
+#[tauri::command]
+async fn font_list() -> Result<Vec<FontOption>, String> {
+    blocking(|| Ok(engine::fonts::font_options())).await
+}
+
+#[tauri::command]
+async fn text_blocks(docs: State<'_, Docs>, id: u64, page: i32) -> Result<Vec<TextBlock>, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.text_blocks(id, page)).await
+}
+
+/// The look of text as chosen in the UI (fonts by name).
+#[derive(serde::Deserialize)]
+struct StyleChoice {
+    bangla_font: String,
+    english_font: String,
+    size: f32,
+    line_height: Option<f32>,
+    bold: bool,
+    italic: bool,
+    color: [u8; 3],
+    align: Align,
+}
+
+/// Replace a block of text or add a new text box. Fails with
+/// `TEXT_TOO_LONG:<lines needed>:<lines that fit>` when the text needs more
+/// room and `placement.fit` is "check".
+#[tauri::command]
+async fn place_text(
+    app: AppHandle,
+    docs: State<'_, Docs>,
+    id: u64,
+    page: i32,
+    text: String,
+    style: StyleChoice,
+    placement: TextPlacement,
+) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    let dir = fonts_dir(&app);
+    blocking(move || {
+        let size = style.size.clamp(2.0, 400.0);
+        let style = Style {
+            bangla: engine::fonts::bangla_faces(&style.bangla_font, &dir),
+            english: engine::fonts::english_face(&style.english_font),
+            size,
+            line_height: style.line_height.filter(|lh| *lh > 0.0).unwrap_or(size * 1.25),
+            bold: style.bold,
+            italic: style.italic,
+            color: style.color,
+            align: style.align,
+        };
+        viewer.edit(id, PageEdit::PlaceText { page, text, style, placement })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn markup_text(
+    docs: State<'_, Docs>,
+    id: u64,
+    page: i32,
+    markup: Markup,
+    rect: [f32; 4],
+    color: [u8; 3],
+) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.edit(id, PageEdit::Markup { page, markup, rect, color })).await
+}
+
+/// Black out an area: everything under it is removed for good (FR-6.8).
+#[tauri::command]
+async fn redact_area(docs: State<'_, Docs>, id: u64, page: i32, rect: [f32; 4]) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.edit(id, PageEdit::Redact { page, rect })).await
+}
+
 #[tauri::command]
 fn recent_files(app: AppHandle) -> Vec<String> {
     read_recent(&app)
@@ -483,6 +567,11 @@ pub fn run() {
             list_signatures,
             save_signature,
             delete_signature,
+            font_list,
+            text_blocks,
+            place_text,
+            markup_text,
+            redact_area,
             recent_files,
             clear_recent_files,
         ])
