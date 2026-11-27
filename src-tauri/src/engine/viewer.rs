@@ -25,7 +25,8 @@ use serde::{Deserialize, Serialize};
 use super::extract::display_list_lines;
 use super::images::{self, PageImage};
 use super::layout::Style;
-use super::textedit::{self, Markup, TextBlock, TextPlacement};
+use super::forms::{self, FormField};
+use super::textedit::{self, Decoration, Markup, TextBlock, TextPlacement};
 use super::pages;
 
 /// Recorded pages kept per document. A page is re-recorded if evicted.
@@ -61,6 +62,10 @@ pub struct DocInfo {
     pub dirty: bool,
     pub can_undo: bool,
     pub can_redo: bool,
+    /// A new document that has never been saved (Save asks for a name).
+    pub untitled: bool,
+    /// The document has form fields to fill in.
+    pub has_form: bool,
 }
 
 /// A change to the pages of an open document. Page numbers are zero-based.
@@ -85,6 +90,12 @@ pub enum PageEdit {
     Markup { page: i32, markup: Markup, rect: [f32; 4], color: [u8; 3] },
     /// Remove everything in an area for good, under a black box.
     Redact { page: i32, rect: [f32; 4] },
+    /// Page numbers, header, footer or watermark.
+    Decorate { item: Decoration, style: Style },
+    /// Fill in a form field.
+    SetField { page: i32, xref: i32, value: String, style: Style },
+    /// Make form fields part of the pages.
+    Flatten,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -181,6 +192,17 @@ enum Job {
         page: i32,
         reply: Sender<Result<Vec<TextBlock>>>,
     },
+    Fields {
+        id: u64,
+        page: i32,
+        reply: Sender<Result<Vec<FormField>>>,
+    },
+    /// A new document made in memory (blank, from pictures, …).
+    OpenBytes {
+        bytes: Vec<u8>,
+        name: String,
+        reply: Sender<Result<DocInfo>>,
+    },
 }
 
 /// One earlier state of a document, for undo and redo.
@@ -206,6 +228,7 @@ struct Entry {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     version: u64,
+    untitled: bool,
 }
 
 /// Handle to the engine thread. Cheap to share between threads.
@@ -249,6 +272,7 @@ impl Viewer {
                                     undo: Vec::new(),
                                     redo: Vec::new(),
                                     version: 0,
+                                    untitled: false,
                                 });
                                 let info = entry.info(id);
                                 if info.is_err() {
@@ -283,6 +307,40 @@ impl Viewer {
                         }
                         Job::Blocks { id, page, reply } => {
                             let result = entry(&mut docs, id).and_then(|e| textedit::text_blocks(&e.doc, page));
+                            let _ = reply.send(result);
+                        }
+                        Job::Fields { id, page, reply } => {
+                            let result = entry(&mut docs, id).and_then(|e| forms::fields(&e.doc, page));
+                            let _ = reply.send(result);
+                        }
+                        Job::OpenBytes { bytes, name, reply } => {
+                            let result = PdfDocument::from_bytes(&bytes).map_err(anyhow::Error::from).and_then(|doc| {
+                                let id = next_id;
+                                next_id += 1;
+                                let state = new_state();
+                                let entry = docs.entry(id).or_insert(Entry {
+                                    doc,
+                                    path: PathBuf::from(name),
+                                    password: None,
+                                    file_size: bytes.len() as u64,
+                                    page_count: 0,
+                                    lists: HashMap::new(),
+                                    recent: VecDeque::new(),
+                                    // Unsaved from the start.
+                                    state: new_state(),
+                                    saved_state: state,
+                                    current: Some(Arc::new(bytes)),
+                                    undo: Vec::new(),
+                                    redo: Vec::new(),
+                                    version: 0,
+                                    untitled: true,
+                                });
+                                let info = entry.info(id);
+                                if info.is_err() {
+                                    docs.remove(&id);
+                                }
+                                info
+                            });
                             let _ = reply.send(result);
                         }
                         Job::Snapshot { id, reply } => {
@@ -325,6 +383,21 @@ impl Viewer {
     /// Images drawn on a page, and which of them can be deleted or replaced.
     pub fn images(&self, id: u64, page: i32) -> Result<Vec<PageImage>> {
         self.ask(|reply| Job::Images { id, page, reply })?
+    }
+
+    /// Open a document made in memory (not yet saved anywhere).
+    pub fn open_bytes(&self, bytes: Vec<u8>, name: &str) -> Result<DocInfo> {
+        self.ask(|reply| Job::OpenBytes { bytes, name: name.to_string(), reply })?
+    }
+
+    /// Form fields on a page.
+    pub fn fields(&self, id: u64, page: i32) -> Result<Vec<FormField>> {
+        self.ask(|reply| Job::Fields { id, page, reply })?
+    }
+
+    /// The document as it is now, as bytes, with its password (for exports).
+    pub fn snapshot(&self, id: u64) -> Result<(Arc<Vec<u8>>, Option<String>)> {
+        self.ask(|reply| Job::Snapshot { id, reply })?
     }
 
     /// The text blocks on a page, for editing.
@@ -559,6 +632,8 @@ impl Entry {
             dirty: self.state != self.saved_state,
             can_undo: !self.undo.is_empty(),
             can_redo: !self.redo.is_empty(),
+            untitled: self.untitled,
+            has_form: forms::has_form(&self.doc).unwrap_or(false),
         })
     }
 
@@ -628,6 +703,11 @@ impl Entry {
             PageEdit::Redact { page, rect } => {
                 self.check_page(page).and_then(|_| textedit::redact(&mut self.doc, page, rect))
             }
+            PageEdit::Decorate { item, style } => textedit::decorate(&mut self.doc, &item, &style).map(|_| ()),
+            PageEdit::SetField { page, xref, value, style } => {
+                self.check_page(page).and_then(|_| forms::set_field(&mut self.doc, page, xref, &value, &style))
+            }
+            PageEdit::Flatten => forms::flatten(&mut self.doc),
         };
         if let Err(e) = result {
             // A change that fails half way must not leave a half-changed document.
@@ -664,10 +744,14 @@ impl Entry {
     }
 
     fn save(&mut self, dest: Option<PathBuf>, id: u64) -> Result<DocInfo> {
+        if dest.is_none() && self.untitled {
+            bail!("NEEDS_SAVE_AS");
+        }
         let dest = dest.unwrap_or_else(|| self.path.clone());
         let bytes = pages::to_bytes(&self.doc, pages::save_options())?;
         pages::write_file_safely(&dest, &bytes)?;
         self.path = dest;
+        self.untitled = false;
         self.file_size = bytes.len() as u64;
         self.saved_state = self.state;
         self.info(id)

@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import { deleteExistingImage, replaceExistingImage } from "../insertTools";
 import { useApp, type Editing, type Placing, type Tool } from "../store";
 import { editBlock, markArea, newTextBox, redact } from "../textTools";
+import FormLayer from "./FormLayer";
 import PlacementOverlay from "./PlacementOverlay";
 import TextEditor from "./TextEditor";
 
@@ -28,11 +29,13 @@ interface Props {
   tool: Tool;
   /** Text being edited on this page, if any. */
   editing: Editing | null;
+  /** The document has form fields: show inputs over them. */
+  hasForm: boolean;
 }
 
 const DRAG_TOOLS: Tool[] = ["highlight", "underline", "strike", "redact"];
 
-function PageView({ docId, version, index, size, scale, top, hits, currentHit, onGoTo, placing, tool, editing }: Props) {
+function PageView({ docId, version, index, size, scale, top, hits, currentHit, onGoTo, placing, tool, editing, hasForm }: Props) {
   const imageMode = tool === "images";
   const lang = useApp((s) => s.lang);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -213,6 +216,8 @@ function PageView({ docId, version, index, size, scale, top, hits, currentHit, o
           )}
         </div>
       )}
+
+      {hasForm && tool === "none" && !placing && !editing && <FormLayer docId={docId} page={index} version={version} scale={scale} />}
 
       {placing && <PlacementOverlay docId={docId} placing={placing} scale={scale} pageSize={size} />}
 

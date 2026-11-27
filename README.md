@@ -6,13 +6,26 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Everything happens on your own PC. The app contains **no network code**, so your files never leave your computer.
 - Free forever, licensed under **AGPL-3.0-or-later**.
 
-> **Status: Phase 5 of 8 — Bangla and English text editing.** Edit existing
-> text, add text boxes, highlight and redact; plus the viewer, page tools,
-> pictures and signatures. See the [roadmap](#roadmap).
+> **Status: Phase 6 of 8 — create, convert and forms.** New PDFs, pictures
+> to PDF and back, compression, passwords, page numbers and watermarks, and
+> Bangla form filling; plus text editing, page tools, pictures and
+> signatures. See the [roadmap](#roadmap).
 
-## What you can do (v0.5)
+## What you can do (v0.6)
 
-### Text editing (new in v0.5)
+### Create, convert and forms (new in v0.6)
+
+- **New blank PDF**: A4, Letter, Legal, A5 or a custom size, portrait or landscape, any number of pages.
+- **Pictures to PDF**: one picture per page, in your order; centred on A4 pages (landscape for wide pictures) or pages the size of each picture.
+- **Save pages as pictures**: PNG or JPG at 72–600 dpi, for all or selected pages.
+- **Compress**: low (tidy the file), medium (pictures above 150 dpi reduced) or high (above 100 dpi, for email). Shows the size before and after. Text stays searchable.
+- **Password**: save a copy protected with AES-256, or a copy without the password.
+- **Page numbers, header, footer and watermark** in Bangla or English, with Bangla digits (পৃষ্ঠা ১ / ৩), any size and colour; the watermark is see-through and can be turned.
+- **Fill in PDF forms**: text fields, checkboxes, radio buttons and drop-downs, typed straight into the page. Bangla answers are drawn with proper shaping, so they show correctly in Adobe Reader and Chrome too. **Flatten** makes the answers part of the page.
+- **Word to PDF**, if LibreOffice (free) or Microsoft Word is installed on your PC. Akkhor runs it hidden on your PC; nothing is uploaded.
+- **Move text**: drag the ✥ handle of a text box (new or existing) to a new place.
+
+### Text editing
 
 - **Edit text**: click a block of text, change it, Apply (Ctrl+Enter). The old text is removed (only the text: pictures and lines under it stay) and the new text is shaped by HarfBuzz, so conjuncts such as ক্ষ্ম and vowel signs such as ি and ে come out right. It reads back as the exact Unicode you typed, so copy and search work.
 - Bangla and English in one line: each character gets the right font automatically.
@@ -140,7 +153,10 @@ src-tauri/src/engine/    PDF engine (Rust)
   pages.rs               page tools: rotate, delete, reorder, insert, split, merge
   images.rs              pictures: shrink, place (rotation, opacity), find, delete, replace
   signatures.rs          "My signatures", encrypted with Windows DPAPI
-  textedit.rs            text blocks, wrapping, replace/add text, highlight, redact
+  textedit.rs            text blocks, wrapping, replace/add/move text, highlight, redact, page numbers, watermark
+  convert.rs             blank PDF, pictures to PDF, pages to pictures, compress, password
+  forms.rs               fill and flatten forms, with Bangla appearances
+  office.rs              Word to PDF through LibreOffice or Word, if installed
   edit.rs                replace text in an existing PDF (spike)
   render.rs              page → PNG
   selftest.rs            SRS 6.4 shaping check + edit spike
@@ -155,8 +171,8 @@ scripts/                 helper scripts (no-network check)
 2. PDF viewer and printing ✅
 3. Page tools (merge, split, rotate, delete, reorder) ✅
 4. Images and signatures ✅
-5. **Text editing, Bangla and English (core feature)** ✅ ← you are here
-6. Create, convert and forms
+5. Text editing, Bangla and English (core feature) ✅
+6. **Create, convert and forms** ✅ ← you are here
 7. Bijoy → Unicode and OCR
 8. (Later) Digital certificate signatures
 

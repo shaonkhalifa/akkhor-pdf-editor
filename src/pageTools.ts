@@ -152,6 +152,8 @@ export async function redo(id: number) {
 
 /** Save to the document's own file. Returns false if it failed. */
 export async function save(id: number): Promise<boolean> {
+  // A new document has no file yet: ask where to save it.
+  if (tabOf(id)?.doc.untitled) return saveAs(id);
   try {
     useApp.getState().setDoc(await savePdf(id));
     useApp.getState().notify(t(lang(), "saved"));

@@ -57,7 +57,10 @@ export function editBlock(id: number, page: number, block: TextBlock) {
     color: hexToRgb(block.color),
     align: "left",
   };
-  const editing: Editing = { page, block, left: block.origin[0], top: block.rect[1], width: block.max_width, text: block.text, style };
+  const lh = style.line_height ?? style.size * 1.25;
+  const top = block.rect[1] - (lh - style.size) / 2;
+  const left = block.origin[0];
+  const editing: Editing = { page, block, left, top, startLeft: left, startTop: top, width: block.max_width, text: block.text, style };
   useApp.getState().update(id, { editing });
 }
 
@@ -77,7 +80,7 @@ export function newTextBox(id: number, page: number, x: number, y: number) {
     color: [0, 0, 0],
     align: "left",
   };
-  useApp.getState().update(id, { editing: { page, block: null, left: x, top: y, width, text: "", style } });
+  useApp.getState().update(id, { editing: { page, block: null, left: x, top: y, startLeft: x, startTop: y, width, text: "", style } });
 }
 
 export function updateEditing(id: number, patch: Partial<Editing>) {
@@ -109,7 +112,8 @@ export async function applyEditing(id: number, fit: Fit = "check"): Promise<bool
   const e = tab?.editing;
   if (!e) return false;
   const b = e.block;
-  if (b && e.text === b.text && fit === "check" && sameStyle(e, b)) {
+  const moved = Math.abs(e.left - e.startLeft) > 0.5 || Math.abs(e.top - e.startTop) > 0.5;
+  if (b && e.text === b.text && fit === "check" && !moved && sameStyle(e, b)) {
     cancelEditing(id); // Nothing changed.
     return true;
   }
@@ -117,9 +121,11 @@ export async function applyEditing(id: number, fit: Fit = "check"): Promise<bool
     ? {
         left: e.left,
         width: e.width,
-        baseline: b.origin[1],
+        // Moving the box moves the text with it.
+        baseline: b.origin[1] + (e.top - e.startTop),
         top: null,
-        max_height: b.rect[3] - b.rect[1],
+        // A moved block may use the space where it lands.
+        max_height: moved ? null : b.rect[3] - b.rect[1],
         remove: b.lines,
         fit,
       }
