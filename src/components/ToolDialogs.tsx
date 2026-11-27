@@ -1,6 +1,6 @@
 // Create and convert (SRS Module 7): the dialogs for new PDFs, pictures,
 // compression, passwords, and page numbers / header / footer / watermark.
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   compressPdf,
@@ -10,6 +10,10 @@ import {
   picturesToPdf,
   protectPdf,
   unprotectPdf,
+  ocrPage,
+  ocrStatus,
+  pageText,
+  type OcrStatus,
   type Compression,
   type DocInfo,
   type PictureFormat,
@@ -502,6 +506,105 @@ export function DecorateDialog({ doc, kind, onClose }: { doc: DocInfo; kind: Dec
       )}
       <PagesChoice p={p} lang={lang} />
       <p className="muted small">{t(lang, "undoHint")}</p>
+    </Dialog>
+  );
+}
+
+
+/** Make scanned pages searchable with OCR (SRS Module 10). */
+export function OcrDialog({ doc, onClose }: { doc: DocInfo; onClose: () => void }) {
+  const lang = useApp((s) => s.lang);
+  const setDoc = useApp((s) => s.setDoc);
+  const notify = useApp((s) => s.notify);
+  const p = usePages(doc);
+  const [status, setStatus] = useState<OcrStatus | null>(null);
+  const [dpi, setDpi] = useState(300);
+  const [skipText, setSkipText] = useState(true);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const stop = useRef(false);
+
+  useEffect(() => {
+    ocrStatus().then(setStatus).catch(() => setStatus({ datadir: null, languages: [] }));
+  }, []);
+
+  const run = async () => {
+    stop.current = false;
+    let todo = p.pages;
+    if (skipText) {
+      const kept: number[] = [];
+      for (const page of todo) {
+        const lines = await pageText(doc.id, page).catch(() => []);
+        if (lines.length === 0) kept.push(page);
+      }
+      todo = kept;
+    }
+    if (!todo.length) {
+      await message(t(lang, "ocrNothingToDo"), { kind: "info" });
+      return;
+    }
+    setProgress({ done: 0, total: todo.length });
+    try {
+      for (let i = 0; i < todo.length; i++) {
+        if (stop.current) break;
+        setDoc(await ocrPage(doc.id, todo[i], dpi));
+        setProgress({ done: i + 1, total: todo.length });
+      }
+      notify(t(lang, "ocrDone"));
+      onClose();
+    } catch (e) {
+      await fail(e);
+      setProgress(null);
+    }
+  };
+
+  const ready = !!status?.datadir;
+  return (
+    <Dialog
+      title={t(lang, "ocrTitle")}
+      onClose={() => !progress && onClose()}
+      actions={
+        progress ? (
+          <button className="ghost" onClick={() => (stop.current = true)}>{t(lang, "stop")}</button>
+        ) : (
+          <>
+            <button className="ghost" onClick={onClose}>{t(lang, "cancel")}</button>
+            <button className="primary" disabled={!ready} onClick={run}>{t(lang, "ocrStart")}</button>
+          </>
+        )
+      }
+    >
+      {status === null ? (
+        <p className="muted">…</p>
+      ) : !ready ? (
+        <>
+          <p className="error">{t(lang, "ocrMissing")}</p>
+          <p className="muted small">{t(lang, "ocrMissingHow")}</p>
+          <code className="copyable">https://github.com/shaonkhalifa/akkhor-pdf-editor/releases</code>
+        </>
+      ) : progress ? (
+        <>
+          <p>{t(lang, "ocrWorking", { done: num(lang, progress.done), total: num(lang, progress.total) })}</p>
+          <progress max={progress.total} value={progress.done} />
+        </>
+      ) : (
+        <>
+          <p className="muted small">{t(lang, "ocrIntro")}</p>
+          <p className="muted small">✓ {t(lang, "ocrLanguages")}: {status.languages.join(", ")}</p>
+          <PagesChoice p={p} lang={lang} />
+          <label className="choice">
+            <input type="checkbox" checked={skipText} onChange={(e) => setSkipText(e.target.checked)} /> {t(lang, "ocrSkipText")}
+          </label>
+          <label className="choice">
+            {t(lang, "quality")}
+            <select value={dpi} onChange={(e) => setDpi(Number(e.target.value))}>
+              {[200, 300, 400].map((d) => (
+                <option key={d} value={d}>{num(lang, d)} dpi{d === 300 ? ` (${t(lang, "recommended")})` : ""}</option>
+              ))}
+            </select>
+          </label>
+          <p className="muted small">{t(lang, "ocrNote")}</p>
+        </>
+      )}
     </Dialog>
   );
 }

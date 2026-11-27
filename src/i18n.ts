@@ -356,6 +356,39 @@ const strings = {
     en: "The answers become part of the page and can’t be changed later. Before saving, Ctrl+Z still works.",
   },
 
+  // Bijoy to Unicode (Phase 7)
+  convertFromBijoy: { bn: "বিজয় থেকে ইউনিকোডে রূপান্তর", en: "Convert from Bijoy" },
+  bijoyDetected: { bn: "এই লেখা বিজয় (SutonnyMJ ধরনের) ফন্টে।", en: "This text is in a Bijoy (SutonnyMJ-style) font." },
+  bijoyConverted: { bn: "বিজয় থেকে ইউনিকোড করা হয়েছে — মিলিয়ে দেখুন।", en: "Converted from Bijoy — please check it." },
+  undoConversion: { bn: "আগের মতো করুন", en: "Undo conversion" },
+  bijoyDocMenu: { bn: "সব বিজয় লেখা ইউনিকোডে রূপান্তর", en: "Convert all Bijoy text to Unicode" },
+  bijoyDocDone: { bn: "বিজয় লেখা ইউনিকোডে রূপান্তর হয়েছে (Ctrl+Z দিয়ে ফেরানো যায়)", en: "Bijoy text converted to Unicode (Ctrl+Z to undo)" },
+  noBijoyText: { bn: "এই PDF-এ বিজয় ফন্টের কোনো লেখা পাওয়া যায়নি।", en: "No text in a Bijoy font was found in this PDF." },
+
+  // OCR (Phase 7)
+  ocrTitle: { bn: "স্ক্যান করা পাতা খোঁজার যোগ্য করুন (OCR)", en: "Make searchable (OCR)" },
+  ocrStart: { bn: "শুরু করুন", en: "Start" },
+  stop: { bn: "থামান", en: "Stop" },
+  ocrIntro: {
+    bn: "স্ক্যান করা পাতার লেখা চিনে পাতার নিচে অদৃশ্য লেখা বসানো হবে। পাতা দেখতে একই থাকবে, কিন্তু খোঁজা, বাছাই ও কপি করা যাবে।",
+    en: "The text on scanned pages is recognised and laid invisibly under each page. Pages look the same but can be searched, selected and copied.",
+  },
+  ocrLanguages: { bn: "ভাষা", en: "Languages" },
+  ocrSkipText: { bn: "যেসব পাতায় আগে থেকেই লেখা আছে সেগুলো বাদ দিন", en: "Skip pages that already have text" },
+  ocrNote: {
+    bn: "প্রতিটি পাতা ছবি হিসেবে নতুন করে তৈরি হয়, তাই শুধু স্ক্যান করা পাতায় ব্যবহার করুন। প্রতি পাতায় কয়েক সেকেন্ড লাগে। Ctrl+Z দিয়ে ফেরানো যায়।",
+    en: "Each page is redrawn as a picture, so use this on scanned pages. It takes a few seconds per page. Ctrl+Z undoes it.",
+  },
+  ocrWorking: { bn: "লেখা চেনা হচ্ছে… {done} / {total} পাতা", en: "Recognising text… page {done} of {total}" },
+  ocrDone: { bn: "পাতাগুলো এখন খোঁজার যোগ্য", en: "The pages are now searchable" },
+  ocrNothingToDo: { bn: "বাছাই করা সব পাতায় আগে থেকেই লেখা আছে।", en: "All the chosen pages already have text." },
+  ocrMissing: { bn: "OCR ভাষা প্যাক ইনস্টল করা নেই।", en: "The OCR language pack is not installed." },
+  ocrMissingHow: {
+    bn: "অক্ষরের GitHub Releases পাতা থেকে “Akkhor-OCR-Pack-ben-eng” ইনস্টলারটি নিন (বিনামূল্যে, প্রায় ২২ MB), চালান, তারপর অক্ষর আবার খুলুন। অক্ষর নিজে কিছু ডাউনলোড করে না।",
+    en: "Get the “Akkhor-OCR-Pack-ben-eng” installer from Akkhor’s GitHub Releases page (free, about 22 MB), run it, then restart Akkhor. Akkhor itself never downloads anything.",
+  },
+  readWithOcr: { bn: "OCR দিয়ে পড়ুন", en: "Read with OCR" },
+
   // Self-test (Phase 1)
   phase: { bn: "বাংলা শেপিং পরীক্ষা", en: "Bangla shaping self-test" },
   intro: {

@@ -46,3 +46,7 @@ desktop.ini
 *.p12
 *.pem
 *.key
+
+# OCR pack build files (language data is downloaded or copied in; not committed)
+ocr-pack/data/
+ocr-pack/dist/

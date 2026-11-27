@@ -691,6 +691,75 @@ async fn flatten_form(docs: State<'_, Docs>, id: u64) -> Result<DocInfo, String>
     blocking(move || viewer.edit(id, PageEdit::Flatten)).await
 }
 
+// ---------------------------------------------------------------------------
+// Bijoy to Unicode (SRS Module 9)
+// ---------------------------------------------------------------------------
+
+/// Convert Bijoy text (typed or pasted) to Unicode Bangla.
+#[tauri::command]
+fn bijoy_to_unicode(text: String) -> String {
+    engine::bijoy::to_unicode(&text)
+}
+
+/// Does this text look like Bijoy? (Used to offer conversion on paste.)
+#[tauri::command]
+fn looks_like_bijoy(text: String) -> bool {
+    engine::bijoy::looks_like_bijoy(&text)
+}
+
+/// Convert all Bijoy text on some pages (all when empty) to Unicode.
+#[tauri::command]
+async fn convert_bijoy_pages(app: AppHandle, docs: State<'_, Docs>, id: u64, pages: Vec<i32>) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    let dir = fonts_dir(&app);
+    blocking(move || {
+        // SRS 6.3: SolaimanLipi if installed, else the bundled Noto Sans Bengali.
+        let (bangla, _) = engine::fonts::match_original("SutonnyMJ", false, false);
+        let choice = StyleChoice {
+            bangla_font: bangla,
+            english_font: engine::fonts::SANS.to_string(),
+            size: 12.0,
+            line_height: None,
+            bold: false,
+            italic: false,
+            color: [0, 0, 0],
+            align: Align::Left,
+        };
+        let style = resolve_style(&choice, &dir);
+        viewer.edit(id, PageEdit::ConvertBijoy { pages, style })
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// OCR (SRS Module 10)
+// ---------------------------------------------------------------------------
+
+/// Is the OCR language pack installed?
+#[tauri::command]
+fn ocr_status() -> engine::ocr::OcrStatus {
+    engine::ocr::status(&[])
+}
+
+fn ocr_dir() -> anyhow::Result<PathBuf> {
+    engine::ocr::status(&[]).datadir.map(PathBuf::from).ok_or_else(|| anyhow::anyhow!("OCR_DATA_MISSING"))
+}
+
+/// Make one page searchable (undoable). Pages are done one at a time so the
+/// window can show progress and stop.
+#[tauri::command]
+async fn ocr_page(docs: State<'_, Docs>, id: u64, page: i32, dpi: u32) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.edit(id, PageEdit::Ocr { page, datadir: ocr_dir()?, dpi })).await
+}
+
+/// Read the text in an area of a page.
+#[tauri::command]
+async fn ocr_area(docs: State<'_, Docs>, id: u64, page: i32, rect: [f32; 4]) -> Result<String, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.ocr_area(id, page, rect, &ocr_dir()?)).await
+}
+
 #[tauri::command]
 fn office_status() -> engine::office::OfficeStatus {
     engine::office::status()
@@ -769,6 +838,12 @@ pub fn run() {
             flatten_form,
             office_status,
             word_to_pdf,
+            bijoy_to_unicode,
+            looks_like_bijoy,
+            convert_bijoy_pages,
+            ocr_status,
+            ocr_page,
+            ocr_area,
             recent_files,
             clear_recent_files,
         ])

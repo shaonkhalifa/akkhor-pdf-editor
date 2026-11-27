@@ -6,14 +6,24 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Everything happens on your own PC. The app contains **no network code**, so your files never leave your computer.
 - Free forever, licensed under **AGPL-3.0-or-later**.
 
-> **Status: Phase 6 of 8 — create, convert and forms.** New PDFs, pictures
-> to PDF and back, compression, passwords, page numbers and watermarks, and
-> Bangla form filling; plus text editing, page tools, pictures and
-> signatures. See the [roadmap](#roadmap).
+> **Status: Phase 7 of 8 — Bijoy to Unicode and OCR.** Old Bijoy (SutonnyMJ)
+> text becomes real Unicode Bangla, and scanned pages become searchable;
+> plus everything from Phases 1–6. See the [roadmap](#roadmap).
 
-## What you can do (v0.6)
+## What you can do (v0.7)
 
-### Create, convert and forms (new in v0.6)
+### Bijoy to Unicode and OCR (new in v0.7)
+
+- **Bijoy text is found automatically** by its font (SutonnyMJ and other "MJ" fonts) and outlined in orange in Edit text mode.
+- **Convert from Bijoy**: one block in the text editor, or every Bijoy block in the document (More → Convert all Bijoy text to Unicode). The text becomes real Unicode Bangla, so it can be searched, copied and edited. Undo works.
+- **Paste Bijoy text** into a text box and it goes in as Unicode automatically (with an "undo conversion" link).
+- **OCR — make scanned pages searchable** (More → Make searchable): recognises Bangla and English with Tesseract, inside the app, on your PC. The page looks the same, with the recognised text invisible underneath. Pages that already have text are skipped.
+- **Read with OCR**: for text that can't be read (broken fonts), recognise it from the page instead.
+- **OCR language pack**: the Bangla + English models (about 22 MB) are a separate, free, offline installer, `Akkhor-OCR-Pack-ben-eng-<version>.exe`, on the GitHub Releases page. The app never downloads anything. Build it with `scripts\build-ocr-pack.ps1`.
+
+The Bijoy converter is ported from [bijoy2unicode](https://github.com/Mad-FOX/bijoy2unicode) by Rajib Biswas (MPL-2.0); `src-tauri/src/engine/bijoy.rs` stays under the MPL-2.0. OCR uses [Tesseract](https://github.com/tesseract-ocr/tesseract) (Apache-2.0), compiled into MuPDF, and the [tessdata_best](https://github.com/tesseract-ocr/tessdata_best) models (Apache-2.0).
+
+### Create, convert and forms
 
 - **New blank PDF**: A4, Letter, Legal, A5 or a custom size, portrait or landscape, any number of pages.
 - **Pictures to PDF**: one picture per page, in your order; centred on A4 pages (landscape for wide pictures) or pages the size of each picture.
@@ -157,6 +167,9 @@ src-tauri/src/engine/    PDF engine (Rust)
   convert.rs             blank PDF, pictures to PDF, pages to pictures, compress, password
   forms.rs               fill and flatten forms, with Bangla appearances
   office.rs              Word to PDF through LibreOffice or Word, if installed
+  bijoy.rs               Bijoy (SutonnyMJ) to Unicode (MPL-2.0, from bijoy2unicode)
+  ocr.rs                 OCR with Tesseract: searchable pages, read an area
+ocr-pack/                the separate OCR language pack installer (NSIS)
   edit.rs                replace text in an existing PDF (spike)
   render.rs              page → PNG
   selftest.rs            SRS 6.4 shaping check + edit spike
@@ -172,8 +185,8 @@ scripts/                 helper scripts (no-network check)
 3. Page tools (merge, split, rotate, delete, reorder) ✅
 4. Images and signatures ✅
 5. Text editing, Bangla and English (core feature) ✅
-6. **Create, convert and forms** ✅ ← you are here
-7. Bijoy → Unicode and OCR
+6. Create, convert and forms ✅
+7. **Bijoy → Unicode and OCR** ✅ ← you are here
 8. (Later) Digital certificate signatures
 
 ## Contributing
