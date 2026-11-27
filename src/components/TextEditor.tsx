@@ -3,7 +3,8 @@
 // Ctrl+Enter applies, Escape cancels. The box can be widened by dragging its
 // right edge; text wraps inside it (FR-6.12).
 import { useEffect, useRef, useState } from "react";
-import type { FontOption } from "../api";
+import { bijoyToUnicode, looksLikeBijoy, ocrArea, type FontOption } from "../api";
+import { message } from "@tauri-apps/plugin-dialog";
 import { num, t } from "../i18n";
 import { useApp, type Editing } from "../store";
 import { applyEditing, availableFonts, cancelEditing, hexToRgb, rgbToHex, updateEditing, updateStyle } from "../textTools";
@@ -23,6 +24,31 @@ export default function TextEditor({ docId, editing, scale, pageSize }: {
   const lang = useApp((s) => s.lang);
   const [fonts, setFonts] = useState<FontOption[]>([]);
   const [busy, setBusy] = useState(false);
+  /** Text before a Bijoy conversion, to undo it. */
+  const [beforeBijoy, setBeforeBijoy] = useState<string | null>(null);
+
+  // FR-6.11: read text that can't be decoded with OCR instead.
+  const readWithOcr = async () => {
+    if (!block) return;
+    setBusy(true);
+    try {
+      const text = await ocrArea(docId, editing.page, block.rect);
+      setBeforeBijoy(editing.text);
+      updateEditing(docId, { text });
+    } catch (e) {
+      await message(String(e).includes("OCR_DATA_MISSING") ? t(lang, "ocrMissing") : String(e), { kind: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // FR-9.2 / FR-9.3: convert Bijoy text to Unicode in the edit box.
+  const convertBijoy = async (text = editing.text) => {
+    const converted = await bijoyToUnicode(text);
+    setBeforeBijoy(editing.text);
+    const unicodeFont = editing.style.bangla_font && !/mj$/i.test(editing.style.bangla_font) ? editing.style.bangla_font : "Noto Sans Bengali";
+    updateEditing(docId, { text: converted, style: { ...editing.style, bangla_font: unicodeFont } });
+  };
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const resize = useRef<{ x: number; width: number } | null>(null);
   const move = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
@@ -107,6 +133,21 @@ export default function TextEditor({ docId, editing, scale, pageSize }: {
             textAlign: style.align,
           }}
           onChange={(e) => updateEditing(docId, { text: e.target.value })}
+          onPaste={async (e) => {
+            const pasted = e.clipboardData.getData("text/plain");
+            if (!pasted) return;
+            // The paste is inserted here (not by the browser) so that Bijoy
+            // text can go in as Unicode (FR-9.3).
+            e.preventDefault();
+            const el = e.currentTarget;
+            const [a, b] = [el.selectionStart, el.selectionEnd];
+            const before = editing.text;
+            const bijoy = await looksLikeBijoy(pasted).catch(() => false);
+            const inserted = bijoy ? await bijoyToUnicode(pasted) : pasted;
+            if (bijoy) setBeforeBijoy(before.slice(0, a) + pasted + before.slice(b));
+            updateEditing(docId, { text: before.slice(0, a) + inserted + before.slice(b) });
+            requestAnimationFrame(() => el.setSelectionRange(a + inserted.length, a + inserted.length));
+          }}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.preventDefault();
@@ -210,8 +251,25 @@ export default function TextEditor({ docId, editing, scale, pageSize }: {
         </div>
         <div className="row tight between">
           <span className="muted small">
-            {block && !block.readable ? (
-              <span className="warn">⚠ {t(lang, "unreadableText")}</span>
+            {beforeBijoy !== null ? (
+              <span className="ok-note">
+                ✓ {t(lang, "bijoyConverted")}{" "}
+                <button className="link" onClick={() => { updateEditing(docId, { text: beforeBijoy }); setBeforeBijoy(null); }}>
+                  {t(lang, "undoConversion")}
+                </button>
+              </span>
+            ) : block && (block.bijoy || !block.readable) ? (
+              <span className="warn">
+                ⚠ {t(lang, block.bijoy ? "bijoyDetected" : "unreadableText")}{" "}
+                {block.bijoy && (
+                  <button className="link" onClick={() => convertBijoy()}>
+                    {t(lang, "convertFromBijoy")}
+                  </button>
+                )}{" "}
+                <button className="link" onClick={readWithOcr}>
+                  {t(lang, "readWithOcr")}
+                </button>
+              </span>
             ) : block ? (
               `${t(lang, "originalFont")}: ${block.font || "?"} · ${num(lang, Math.round(block.size * 10) / 10)} pt`
             ) : (

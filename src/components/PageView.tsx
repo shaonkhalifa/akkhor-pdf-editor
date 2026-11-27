@@ -226,9 +226,9 @@ function PageView({ docId, version, index, size, scale, top, hits, currentHit, o
         blocks.map((b, i) => (
           <button
             key={i}
-            className={b.readable ? "text-block" : "text-block unreadable"}
+            className={b.bijoy ? "text-block bijoy" : b.readable ? "text-block" : "text-block unreadable"}
             style={box([b.rect[0] - 2, b.rect[1] - 2, b.rect[2] + 2, b.rect[3] + 2])}
-            title={b.readable ? t(lang, "clickToEdit") : t(lang, "unreadableText")}
+            title={b.bijoy ? t(lang, "bijoyDetected") : b.readable ? t(lang, "clickToEdit") : t(lang, "unreadableText")}
             aria-label={`${t(lang, "clickToEdit")}: ${b.text.slice(0, 60)}`}
             onClick={() => editBlock(docId, index, b)}
           />

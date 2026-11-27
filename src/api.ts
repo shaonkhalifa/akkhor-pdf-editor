@@ -218,6 +218,8 @@ export interface TextBlock {
   english_font: string;
   has_bangla: boolean;
   readable: boolean;
+  /** Set in a Bijoy (SutonnyMJ-style) font. */
+  bijoy: boolean;
 }
 
 export type Align = "left" | "center" | "right";
@@ -319,3 +321,27 @@ export const flattenForm = (id: number) => invoke<DocInfo>("flatten_form", { id 
 export const officeStatus = () => invoke<{ libreoffice: boolean; word: boolean }>("office_status");
 
 export const wordToPdf = (path: string) => invoke<DocInfo>("word_to_pdf", { path });
+
+// --- Bijoy to Unicode (Phase 7) ----------------------------------------------
+
+export const bijoyToUnicode = (text: string) => invoke<string>("bijoy_to_unicode", { text });
+
+export const looksLikeBijoy = (text: string) => invoke<boolean>("looks_like_bijoy", { text });
+
+/** Convert all Bijoy text on some pages (all when empty) to Unicode. */
+export const convertBijoyPages = (id: number, pages: number[]) => invoke<DocInfo>("convert_bijoy_pages", { id, pages });
+
+// --- OCR (Phase 7) -----------------------------------------------------------
+
+export interface OcrStatus {
+  datadir: string | null;
+  languages: string[];
+}
+
+export const ocrStatus = () => invoke<OcrStatus>("ocr_status");
+
+/** Make one page searchable (undoable). */
+export const ocrPage = (id: number, page: number, dpi: number) => invoke<DocInfo>("ocr_page", { id, page, dpi });
+
+/** Read the text in an area of a page. */
+export const ocrArea = (id: number, page: number, rect: number[]) => invoke<string>("ocr_area", { id, page, rect });

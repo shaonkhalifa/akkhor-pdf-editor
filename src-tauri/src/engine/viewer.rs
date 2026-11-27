@@ -96,6 +96,10 @@ pub enum PageEdit {
     SetField { page: i32, xref: i32, value: String, style: Style },
     /// Make form fields part of the pages.
     Flatten,
+    /// Bijoy text to Unicode on the given pages (all when empty).
+    ConvertBijoy { pages: Vec<i32>, style: Style },
+    /// Replace a page with a searchable (OCR) copy.
+    Ocr { page: i32, datadir: PathBuf, dpi: u32 },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -196,6 +200,13 @@ enum Job {
         id: u64,
         page: i32,
         reply: Sender<Result<Vec<FormField>>>,
+    },
+    OcrArea {
+        id: u64,
+        page: i32,
+        rect: [f32; 4],
+        datadir: PathBuf,
+        reply: Sender<Result<String>>,
     },
     /// A new document made in memory (blank, from pictures, …).
     OpenBytes {
@@ -313,6 +324,10 @@ impl Viewer {
                             let result = entry(&mut docs, id).and_then(|e| forms::fields(&e.doc, page));
                             let _ = reply.send(result);
                         }
+                        Job::OcrArea { id, page, rect, datadir, reply } => {
+                            let result = entry(&mut docs, id).and_then(|e| super::ocr::read_area(&e.doc, page, rect, &datadir));
+                            let _ = reply.send(result);
+                        }
                         Job::OpenBytes { bytes, name, reply } => {
                             let result = PdfDocument::from_bytes(&bytes).map_err(anyhow::Error::from).and_then(|doc| {
                                 let id = next_id;
@@ -388,6 +403,11 @@ impl Viewer {
     /// Open a document made in memory (not yet saved anywhere).
     pub fn open_bytes(&self, bytes: Vec<u8>, name: &str) -> Result<DocInfo> {
         self.ask(|reply| Job::OpenBytes { bytes, name: name.to_string(), reply })?
+    }
+
+    /// Recognise the text in an area of a page (OCR).
+    pub fn ocr_area(&self, id: u64, page: i32, rect: [f32; 4], datadir: &Path) -> Result<String> {
+        self.ask(|reply| Job::OcrArea { id, page, rect, datadir: datadir.to_path_buf(), reply })?
     }
 
     /// Form fields on a page.
@@ -708,6 +728,10 @@ impl Entry {
                 self.check_page(page).and_then(|_| forms::set_field(&mut self.doc, page, xref, &value, &style))
             }
             PageEdit::Flatten => forms::flatten(&mut self.doc),
+            PageEdit::ConvertBijoy { pages, style } => textedit::convert_bijoy(&mut self.doc, &pages, &style).map(|_| ()),
+            PageEdit::Ocr { page, datadir, dpi } => {
+                self.check_page(page).and_then(|_| super::ocr::make_searchable(&mut self.doc, page, &datadir, dpi)).map(|_| ())
+            }
         };
         if let Err(e) = result {
             // A change that fails half way must not leave a half-changed document.

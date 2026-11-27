@@ -16,8 +16,8 @@ import Sidebar from "./Sidebar";
 import SignatureDialog from "./SignatureDialog";
 import SplitDialog from "./SplitDialog";
 import StampDialog from "./StampDialog";
-import { CompressDialog, DecorateDialog, ExportDialog, PasswordToolDialog } from "./ToolDialogs";
-import { flattenForm } from "../api";
+import { CompressDialog, DecorateDialog, ExportDialog, OcrDialog, PasswordToolDialog } from "./ToolDialogs";
+import { convertBijoyPages, flattenForm } from "../api";
 import { choose } from "./ChoiceDialog";
 import { insertPicture } from "../insertTools";
 import { setTool } from "../textTools";
@@ -60,7 +60,7 @@ export default function DocView({ tab }: { tab: Tab }) {
   const [searching, setSearching] = useState(false);
   const [printing, setPrinting] = useState<number | null>(null);
   const [splitting, setSplitting] = useState(false);
-  const [dialog, setDialog] = useState<"signature" | "stamp" | "export" | "compress" | "password" | "numbers" | "header" | "footer" | "watermark" | null>(null);
+  const [dialog, setDialog] = useState<"signature" | "stamp" | "export" | "compress" | "password" | "numbers" | "header" | "footer" | "watermark" | "ocr" | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
 
   const flatten = async () => {
@@ -70,6 +70,16 @@ export default function DocView({ tab }: { tab: Tab }) {
       useApp.getState().setDoc(await flattenForm(doc.id));
     } catch (e) {
       await message(String(e), { kind: "error" });
+    }
+  };
+
+  const convertAllBijoy = async () => {
+    try {
+      useApp.getState().setDoc(await convertBijoyPages(doc.id, []));
+      useApp.getState().notify(t(lang, "bijoyDocDone"));
+    } catch (e) {
+      const err = String(e);
+      await message(err.includes("NO_BIJOY_TEXT") ? t(lang, "noBijoyText") : err, { kind: err.includes("NO_BIJOY_TEXT") ? "info" : "error" });
     }
   };
 
@@ -445,6 +455,7 @@ export default function DocView({ tab }: { tab: Tab }) {
                   ["export", "exportPictures"],
                   ["compress", "compress"],
                   ["password", "passwordTool"],
+                  ["ocr", "ocrTitle"],
                 ] as const
               ).map(([id, key]) => (
                 <button
@@ -458,6 +469,15 @@ export default function DocView({ tab }: { tab: Tab }) {
                   {t(lang, key)}…
                 </button>
               ))}
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setToolsOpen(false);
+                  convertAllBijoy();
+                }}
+              >
+                {t(lang, "bijoyDocMenu")}
+              </button>
               {doc.has_form && (
                 <button
                   role="menuitem"
@@ -530,6 +550,7 @@ export default function DocView({ tab }: { tab: Tab }) {
       {dialog === "export" && <ExportDialog doc={doc} onClose={() => setDialog(null)} />}
       {dialog === "compress" && <CompressDialog doc={doc} onClose={() => setDialog(null)} />}
       {dialog === "password" && <PasswordToolDialog doc={doc} onClose={() => setDialog(null)} />}
+      {dialog === "ocr" && <OcrDialog doc={doc} onClose={() => setDialog(null)} />}
       {(dialog === "numbers" || dialog === "header" || dialog === "footer" || dialog === "watermark") && (
         <DecorateDialog doc={doc} kind={dialog} onClose={() => setDialog(null)} />
       )}

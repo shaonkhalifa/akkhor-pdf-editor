@@ -62,6 +62,9 @@ pub struct TextBlock {
     /// False when the text was probably not read correctly (a broken font
     /// map, or legacy Bijoy encoding); the user should check or retype it.
     pub readable: bool,
+    /// Set in a Bijoy (SutonnyMJ-style) font: the text is Bijoy-encoded and
+    /// can be converted to Unicode (FR-9.1).
+    pub bijoy: bool,
 }
 
 /// Does this look like text that was not decoded properly?
@@ -156,6 +159,7 @@ fn block_of(lines: Vec<LineInfo>) -> TextBlock {
     let left = lines.iter().map(|l| l.origin.x).fold(f32::INFINITY, f32::min);
     TextBlock {
         readable: !looks_unreadable(&text, &first.font.name),
+        bijoy: super::bijoy::is_bijoy_font(&first.font.name),
         lines: lines.iter().map(|l| [l.bbox.x0, l.bbox.y0, l.bbox.x1, l.bbox.y1]).collect(),
         rect: [rect.x0, rect.y0, rect.x1, rect.y1],
         origin: [left, first.origin.y],
@@ -475,6 +479,50 @@ pub fn place_text(doc: &mut PdfDocument, page_no: i32, text: &str, style: &Style
     };
     stamp(doc, page_no, &laid, anchor, 1.0)?;
     Ok(lines.len())
+}
+
+// ---------------------------------------------------------------------------
+// Bijoy to Unicode for whole pages (FR-9.2)
+// ---------------------------------------------------------------------------
+
+/// Replace every block of Bijoy-encoded text on `pages` (all when empty)
+/// with the same text in Unicode, set in `style`'s fonts at the block's own
+/// size and colour, kept inside the block's space. Returns how many blocks
+/// were converted.
+pub fn convert_bijoy(doc: &mut PdfDocument, pages: &[i32], style: &Style) -> Result<usize> {
+    let count = doc.page_count()?;
+    let pages: Vec<i32> = if pages.is_empty() { (0..count).collect() } else { pages.iter().copied().filter(|p| (0..count).contains(p)).collect() };
+    let mut converted = 0;
+    for page in pages {
+        let blocks: Vec<TextBlock> = text_blocks(doc, page)?.into_iter().filter(|b| b.bijoy).collect();
+        for b in blocks {
+            let text = super::bijoy::to_unicode(&b.text);
+            let [r, g, bl] = {
+                let n = u32::from_str_radix(b.color.trim_start_matches('#'), 16).unwrap_or(0);
+                [(n >> 16) as u8, (n >> 8) as u8, n as u8]
+            };
+            let mut st = style.clone();
+            st.size = b.size;
+            st.line_height = b.line_height.max(b.size * 1.1);
+            st.bold = b.bold;
+            st.color = [r, g, bl];
+            let at = TextPlacement {
+                left: b.origin[0],
+                width: b.max_width,
+                baseline: Some(b.origin[1]),
+                top: None,
+                max_height: Some((b.rect[3] - b.rect[1]).max(b.size * 1.2)),
+                remove: b.lines.clone(),
+                fit: Fit::Shrink,
+            };
+            place_text(doc, page, &text, &st, &at)?;
+            converted += 1;
+        }
+    }
+    if converted == 0 {
+        bail!("NO_BIJOY_TEXT");
+    }
+    Ok(converted)
 }
 
 // ---------------------------------------------------------------------------
