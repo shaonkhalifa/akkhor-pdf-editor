@@ -6,13 +6,24 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Everything happens on your own PC. The app contains **no network code**, so your files never leave your computer.
 - Free forever, licensed under **AGPL-3.0-or-later**.
 
-> **Status: Phase 3 of 8 — viewer plus page tools.** Open, read, search and
-> print PDFs, and rotate, delete, reorder, insert, extract, split and merge
-> pages, with undo. Text editing comes in Phase 5. See the [roadmap](#roadmap).
+> **Status: Phase 4 of 8 — viewer, page tools, pictures and signatures.**
+> Open, read, search and print PDFs; rotate, delete, reorder, split and merge
+> pages; add pictures, stamps and signatures. Text editing comes in Phase 5.
+> See the [roadmap](#roadmap).
 
-## What you can do (v0.3)
+## What you can do (v0.4)
 
-### Page tools (new in v0.3)
+### Pictures, stamps and signatures (new in v0.4)
+
+- Insert PNG, JPG or WebP pictures. Very large photos are shrunk automatically (longest side 2400 px), so the PDF stays small.
+- Before placing: drag to move, drag the corner to resize (keeps the shape), drag the round handle to turn (snaps to straight angles; Shift for 15° steps), set opacity for logos and watermarks. Enter places it, Esc cancels, arrow keys nudge.
+- **Edit images**: click an image already in the PDF to delete it or replace it with another picture (same place and size). Deleted pictures are removed from the saved file.
+- **Stamps**: অনুমোদিত / APPROVED, পরিশোধিত / PAID, গৃহীত / RECEIVED, খসড়া / DRAFT, গোপনীয় / CONFIDENTIAL, বাতিল / REJECTED, optionally with today's date, plus your own round seal or rectangular stamp in any colour.
+- **Signatures**: draw with mouse, touchpad or pen (pen pressure changes the line), type your name in a handwriting font (Dancing Script, Great Vibes, or Bangla), or use a photo of your signature on paper (the paper is made transparent). Choose black, blue or any ink colour, and add your name and today's date below.
+- **My signatures**: keep signatures for next time. They are encrypted with Windows' own data protection (DPAPI), tied to your Windows login, and never leave your PC.
+- Everything above can be undone (Ctrl+Z).
+
+### Page tools
 
 - Select pages in the thumbnails (Ctrl/Shift+click for several, Ctrl+A for all)
 - Drag thumbnails to put pages in a new order
@@ -64,7 +75,8 @@ Known limits in Phase 1:
 | PDF engine | [MuPDF](https://mupdf.com) via the [`mupdf`](https://crates.io/crates/mupdf) crate (AGPL) |
 | Text shaping | HarfBuzz (inside MuPDF) |
 | UI | React + TypeScript + Vite |
-| Bundled fonts | Noto Sans Bengali, Noto Serif Bengali, Hind Siliguri (SIL OFL) |
+| Bundled fonts | Noto Sans Bengali, Noto Serif Bengali, Hind Siliguri; Dancing Script and Great Vibes for typed signatures (all SIL OFL) |
+| Pictures | [`image`](https://crates.io/crates/image) crate (PNG, JPEG, WebP) |
 
 ## Build and run on Windows
 
@@ -113,6 +125,8 @@ src-tauri/src/engine/    PDF engine (Rust)
   extract.rs             read text and positions back (any page rotation)
   viewer.rs              open documents, drawing, search, undo history
   pages.rs               page tools: rotate, delete, reorder, insert, split, merge
+  images.rs              pictures: shrink, place (rotation, opacity), find, delete, replace
+  signatures.rs          "My signatures", encrypted with Windows DPAPI
   edit.rs                replace text in an existing PDF (spike)
   render.rs              page → PNG
   selftest.rs            SRS 6.4 shaping check + edit spike
@@ -125,8 +139,8 @@ scripts/                 helper scripts (no-network check)
 
 1. Setup, shaping test and text-edit spike ✅
 2. PDF viewer and printing ✅
-3. **Page tools (merge, split, rotate, delete, reorder)** ✅ ← you are here
-4. Images and signatures
+3. Page tools (merge, split, rotate, delete, reorder) ✅
+4. **Images and signatures** ✅ ← you are here
 5. Text editing, Bangla and English (core feature)
 6. Create, convert and forms
 7. Bijoy → Unicode and OCR
@@ -139,4 +153,4 @@ Issues and pull requests are welcome, in Bangla or English. Please run `npm test
 ## Licence
 
 Akkhor PDF Editor is licensed under the **GNU Affero General Public License v3.0 or later**. See [LICENSE](LICENSE).
-MuPDF is © Artifex Software and is used under the AGPL. The bundled fonts are under the SIL Open Font License. Their licence files are in [`src-tauri/fonts/`](src-tauri/fonts/).
+MuPDF is © Artifex Software and is used under the AGPL. The bundled fonts are under the SIL Open Font License. Their licence files are in [`src-tauri/fonts/`](src-tauri/fonts/) and [`src/assets/fonts/`](src/assets/fonts/).

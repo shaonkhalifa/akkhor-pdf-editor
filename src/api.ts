@@ -133,3 +133,56 @@ export function renderPage(id: number, page: number, scale: number, version = 0)
 
 /** CSS pixels per PDF point at 100% zoom (a point is 1/72 inch, a CSS pixel 1/96). */
 export const PX_PER_PT = 96 / 72;
+
+// --- Images, stamps and signatures (Phase 4) --------------------------------
+
+/** A picture ready to place (PNG or JPEG as a data URL). */
+export interface Picture {
+  data_url: string;
+  width: number;
+  height: number;
+}
+
+/** A box on the page in points (as shown), turned clockwise around its centre. */
+export interface Placement {
+  center: [number, number];
+  size: [number, number];
+  rotation: number;
+  opacity: number;
+}
+
+export interface PageImage {
+  rect: [number, number, number, number];
+  /** Set when the image can be deleted or replaced. */
+  xref: number | null;
+  width: number;
+  height: number;
+}
+
+export interface SavedSignature {
+  id: string;
+  label: string;
+  data_url: string;
+  created: number;
+}
+
+export const loadPicture = (path: string) => invoke<Picture>("load_picture", { path });
+
+export const photoSignature = (path: string, ink: [number, number, number]) =>
+  invoke<Picture>("photo_signature", { path, ink });
+
+export const placeImage = (id: number, page: number, dataUrl: string, placement: Placement) =>
+  invoke<DocInfo>("place_image", { id, page, dataUrl, placement });
+
+export const pageImages = (id: number, page: number) => invoke<PageImage[]>("page_images", { id, page });
+
+export const deleteImage = (id: number, page: number, xref: number) => invoke<DocInfo>("delete_image", { id, page, xref });
+
+export const replaceImage = (id: number, page: number, xref: number, path: string) =>
+  invoke<DocInfo>("replace_image", { id, page, xref, path });
+
+export const listSignatures = () => invoke<SavedSignature[]>("list_signatures");
+
+export const saveSignature = (label: string, dataUrl: string) => invoke<SavedSignature>("save_signature", { label, dataUrl });
+
+export const deleteSignature = (id: string) => invoke<void>("delete_signature", { id });

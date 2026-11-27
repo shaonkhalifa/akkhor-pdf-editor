@@ -14,7 +14,9 @@ use tauri::{ipc::Response, path::BaseDirectory, AppHandle, Manager, State};
 
 use engine::fonts::{default_bangla, dev_fonts_dir};
 use engine::selftest::{check_all_fonts, run_edit_spike, FontCheck, SpikeResult};
+use engine::images::{self, PageImage, Placement};
 use engine::pages::{self, MergeInput};
+use engine::signatures::{self, SavedSignature};
 use engine::viewer::{DocInfo, PageEdit, PageLink, SearchHit, TextLine, Viewer};
 
 /// PDFs produced by the last self-test, kept in memory (never written to disk).
@@ -326,6 +328,117 @@ async fn probe_pdf(path: String, password: Option<String>) -> Result<i32, String
     blocking(move || Ok(pages::load(std::path::Path::new(&path), password.as_deref())?.page_count()?)).await
 }
 
+// ---------------------------------------------------------------------------
+// Images, stamps and signatures (SRS Modules 4 and 5)
+// ---------------------------------------------------------------------------
+
+/// A picture ready to place, for the UI to preview.
+#[derive(Serialize)]
+struct Picture {
+    data_url: String,
+    width: u32,
+    height: u32,
+}
+
+fn picture(bytes: &[u8], width: u32, height: u32) -> Picture {
+    let mime = if bytes.starts_with(&[0xFF, 0xD8]) { "image/jpeg" } else { "image/png" };
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+    Picture { data_url: format!("data:{mime};base64,{b64}"), width, height }
+}
+
+/// The bytes inside a `data:image/...;base64,` URL.
+fn from_data_url(url: &str) -> anyhow::Result<Vec<u8>> {
+    let b64 = url
+        .strip_prefix("data:")
+        .and_then(|rest| rest.split_once(";base64,"))
+        .map(|(_, b64)| b64)
+        .ok_or_else(|| anyhow::anyhow!("not a picture"))?;
+    Ok(base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)?)
+}
+
+/// Read a PNG, JPEG or WebP file chosen by the user, shrinking it if it is
+/// very large (FR-4.4).
+#[tauri::command]
+async fn load_picture(path: String) -> Result<Picture, String> {
+    blocking(move || {
+        let prepared = images::prepare(&std::fs::read(&path)?)?;
+        Ok(picture(&prepared.bytes, prepared.width, prepared.height))
+    })
+    .await
+}
+
+/// A photo of a signature on paper, turned into ink on a transparent background.
+#[tauri::command]
+async fn photo_signature(path: String, ink: [u8; 3]) -> Result<Picture, String> {
+    blocking(move || {
+        let png = images::signature_from_photo(&std::fs::read(&path)?, ink)?;
+        let prepared = images::prepare(&png)?;
+        Ok(picture(&prepared.bytes, prepared.width, prepared.height))
+    })
+    .await
+}
+
+/// Put a picture (a data URL from `load_picture`, a stamp or a signature) on a page.
+#[tauri::command]
+async fn place_image(
+    docs: State<'_, Docs>,
+    id: u64,
+    page: i32,
+    data_url: String,
+    placement: Placement,
+) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let bytes = images::prepare(&from_data_url(&data_url)?)?.bytes;
+        viewer.edit(id, PageEdit::PlaceImage { page, bytes, placement })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn page_images(docs: State<'_, Docs>, id: u64, page: i32) -> Result<Vec<PageImage>, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.images(id, page)).await
+}
+
+#[tauri::command]
+async fn delete_image(docs: State<'_, Docs>, id: u64, page: i32, xref: i32) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.edit(id, PageEdit::DeleteImage { page, xref })).await
+}
+
+#[tauri::command]
+async fn replace_image(docs: State<'_, Docs>, id: u64, page: i32, xref: i32, path: String) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let bytes = images::prepare(&std::fs::read(&path)?)?.bytes;
+        viewer.edit(id, PageEdit::ReplaceImage { page, xref, bytes })
+    })
+    .await
+}
+
+fn signature_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("signatures"))
+}
+
+#[tauri::command]
+async fn list_signatures(app: AppHandle) -> Result<Vec<SavedSignature>, String> {
+    let dir = signature_dir(&app)?;
+    blocking(move || signatures::list(&dir)).await
+}
+
+#[tauri::command]
+async fn save_signature(app: AppHandle, label: String, data_url: String) -> Result<SavedSignature, String> {
+    let dir = signature_dir(&app)?;
+    blocking(move || signatures::save(&dir, &label, &from_data_url(&data_url)?)).await
+}
+
+#[tauri::command]
+async fn delete_signature(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = signature_dir(&app)?;
+    blocking(move || signatures::delete(&dir, &id)).await
+}
+
 #[tauri::command]
 fn recent_files(app: AppHandle) -> Vec<String> {
     read_recent(&app)
@@ -361,6 +474,15 @@ pub fn run() {
             split_pdf,
             merge_pdfs,
             probe_pdf,
+            load_picture,
+            photo_signature,
+            place_image,
+            page_images,
+            delete_image,
+            replace_image,
+            list_signatures,
+            save_signature,
+            delete_signature,
             recent_files,
             clear_recent_files,
         ])

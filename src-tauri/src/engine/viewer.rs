@@ -23,6 +23,7 @@ use mupdf::{Colorspace, DisplayList, Document, ImageFormat, Matrix, Outline, Qua
 use serde::{Deserialize, Serialize};
 
 use super::extract::display_list_lines;
+use super::images::{self, PageImage};
 use super::pages;
 
 /// Recorded pages kept per document. A page is re-recorded if evicted.
@@ -73,6 +74,10 @@ pub enum PageEdit {
     Reorder { order: Vec<i32> },
     InsertBlank { at: i32, size: [f32; 2] },
     InsertFile { at: i32, path: PathBuf, password: Option<String> },
+    /// Put a picture (PNG or JPEG bytes) on a page.
+    PlaceImage { page: i32, bytes: Vec<u8>, placement: images::Placement },
+    DeleteImage { page: i32, xref: i32 },
+    ReplaceImage { page: i32, xref: i32, bytes: Vec<u8> },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,6 +163,11 @@ enum Job {
     Snapshot {
         id: u64,
         reply: Sender<Result<(Arc<Vec<u8>>, Option<String>)>>,
+    },
+    Images {
+        id: u64,
+        page: i32,
+        reply: Sender<Result<Vec<PageImage>>>,
     },
 }
 
@@ -255,6 +265,10 @@ impl Viewer {
                         Job::Save { id, dest, reply } => {
                             let _ = reply.send(entry(&mut docs, id).and_then(|e| e.save(dest, id)));
                         }
+                        Job::Images { id, page, reply } => {
+                            let result = entry(&mut docs, id).and_then(|e| images::page_images(&e.doc, page));
+                            let _ = reply.send(result);
+                        }
                         Job::Snapshot { id, reply } => {
                             let result =
                                 entry(&mut docs, id).and_then(|e| Ok((e.current_bytes()?, e.password.clone())));
@@ -290,6 +304,11 @@ impl Viewer {
     /// then belongs to `dest`).
     pub fn save(&self, id: u64, dest: Option<PathBuf>) -> Result<DocInfo> {
         self.ask(|reply| Job::Save { id, dest, reply })?
+    }
+
+    /// Images drawn on a page, and which of them can be deleted or replaced.
+    pub fn images(&self, id: u64, page: i32) -> Result<Vec<PageImage>> {
+        self.ask(|reply| Job::Images { id, page, reply })?
     }
 
     /// Copy some pages of the document, as it is now, into a new PDF file.
@@ -533,6 +552,13 @@ impl Entry {
         Ok(bytes)
     }
 
+    fn check_page(&self, page: i32) -> Result<()> {
+        if page < 0 || page >= self.page_count {
+            bail!("page {} does not exist", page + 1);
+        }
+        Ok(())
+    }
+
     /// Forget recorded pages and tell the UI to redraw.
     fn changed(&mut self) {
         self.lists.clear();
@@ -561,6 +587,15 @@ impl Entry {
             PageEdit::InsertFile { at, path, password } => pages::load(&path, password.as_deref())
                 .and_then(|other| pages::insert_document(&mut self.doc, at, &other))
                 .map(|_| ()),
+            PageEdit::PlaceImage { page, bytes, placement } => {
+                self.check_page(page).and_then(|_| images::place(&mut self.doc, page, &bytes, &placement))
+            }
+            PageEdit::DeleteImage { page, xref } => {
+                self.check_page(page).and_then(|_| images::delete_image(&mut self.doc, page, xref))
+            }
+            PageEdit::ReplaceImage { page, xref, bytes } => {
+                self.check_page(page).and_then(|_| images::replace_image(&mut self.doc, page, xref, &bytes))
+            }
         };
         if let Err(e) = result {
             // A change that fails half way must not leave a half-changed document.

@@ -11,6 +11,10 @@ const paths = {
   extract: "M6 3h8l4 4v14H6zM14 3v4h4M12 17v-7M9 13l3-3 3 3",
   split: "M4 4h7v16H4zM13 4h7v16h-7M7 9h1M7 13h1M16 9h1M16 13h1",
   merge: "M3 5h7v14H3zM14 5h7v14h-7M10 12h4M12 10l2 2-2 2",
+  picture: "M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15.5 9.5h.01",
+  signature: "M3 17c3-1 4-9 6-9s0 9 2 9 2-4 4-4 1 3 3 3h3M3 21h18",
+  stamp: "M9 3h6l-1 7h4l1 4H5l1-4h4zM5 17h14v3H5z",
+  images: "M7 7h14v12H7zM3 3h14v2M3 3v12h2M7 16l4-4 3 3 2-2 5 5",
 } as const;
 
 export type IconName = keyof typeof paths;

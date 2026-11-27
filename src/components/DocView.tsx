@@ -12,7 +12,10 @@ import { useApp, type Tab } from "../store";
 import Icon from "./Icon";
 import PageView from "./PageView";
 import Sidebar from "./Sidebar";
+import SignatureDialog from "./SignatureDialog";
 import SplitDialog from "./SplitDialog";
+import StampDialog from "./StampDialog";
+import { insertPicture } from "../insertTools";
 
 const GAP = 16; // px between pages
 const PAD = 24; // px around the page column
@@ -31,6 +34,7 @@ export default function DocView({ tab }: { tab: Tab }) {
   const [searching, setSearching] = useState(false);
   const [printing, setPrinting] = useState<number | null>(null);
   const [splitting, setSplitting] = useState(false);
+  const [dialog, setDialog] = useState<"signature" | "stamp" | null>(null);
   const setMerge = useApp((s) => s.setMerge);
 
   const maxW = useMemo(() => Math.max(...doc.pages.map((p) => p[0])), [doc.pages]);
@@ -350,6 +354,24 @@ export default function DocView({ tab }: { tab: Tab }) {
         </form>
 
         <span className="sep" />
+        <button className="tool text" onClick={() => insertPicture(doc.id)} title={t(lang, "insertPictureHint")}>
+          <Icon name="picture" size={16} /> {t(lang, "picture")}
+        </button>
+        <button className="tool text" onClick={() => setDialog("signature")} title={t(lang, "signature")}>
+          <Icon name="signature" size={16} /> {t(lang, "signature")}
+        </button>
+        <button className="tool text" onClick={() => setDialog("stamp")} title={t(lang, "stamp")}>
+          <Icon name="stamp" size={16} /> {t(lang, "stamp")}
+        </button>
+        <button
+          className={tab.imageMode ? "tool text on" : "tool text"}
+          aria-pressed={tab.imageMode}
+          onClick={() => update(doc.id, { imageMode: !tab.imageMode, placing: null })}
+          title={t(lang, "editImagesHint")}
+        >
+          <Icon name="images" size={16} /> {t(lang, "editImages")}
+        </button>
+        <span className="sep" />
         <button className="tool text" onClick={() => setSplitting(true)} title={t(lang, "splitTitle")}>
           <Icon name="split" size={16} /> {t(lang, "split")}
         </button>
@@ -381,6 +403,8 @@ export default function DocView({ tab }: { tab: Tab }) {
                 hits={hitsByPage.get(i) ?? []}
                 currentHit={currentHit && currentHit.page === i ? currentHit : null}
                 onGoTo={goTo}
+                placing={tab.placing && tab.placing.page === i ? tab.placing : null}
+                imageMode={tab.imageMode}
               />
             ))}
           </div>
@@ -399,6 +423,9 @@ export default function DocView({ tab }: { tab: Tab }) {
         </div>
       )}
       {splitting && <SplitDialog doc={doc} onClose={() => setSplitting(false)} />}
+      {dialog === "signature" && <SignatureDialog docId={doc.id} onClose={() => setDialog(null)} />}
+      {dialog === "stamp" && <StampDialog docId={doc.id} onClose={() => setDialog(null)} />}
+      {tab.imageMode && <div className="mode-banner">{t(lang, "editImagesBanner")}</div>}
     </div>
   );
 }
