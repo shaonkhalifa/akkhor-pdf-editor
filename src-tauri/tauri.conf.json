@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Akkhor PDF Editor",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "org.akkhor.pdfeditor",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -39,6 +39,8 @@
     ],
     "resources": {
       "fonts/": "fonts/",
+      "../src/assets/fonts/OFL-DancingScript.txt": "fonts/OFL-DancingScript.txt",
+      "../src/assets/fonts/OFL-GreatVibes.txt": "fonts/OFL-GreatVibes.txt",
       "../LICENSE": "LICENSE.txt"
     },
     "license": "AGPL-3.0-or-later",

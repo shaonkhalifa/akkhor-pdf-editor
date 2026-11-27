@@ -1,9 +1,11 @@
 // One PDF page: the drawn image, an invisible text layer for selecting and
 // copying, search highlights and clickable links.
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { pageLinks, pageText, renderPage, type PageLink, type SearchHit, type TextLine } from "../api";
+import { pageImages, pageLinks, pageText, renderPage, type PageImage, type PageLink, type SearchHit, type TextLine } from "../api";
 import { t } from "../i18n";
-import { useApp } from "../store";
+import { deleteExistingImage, replaceExistingImage } from "../insertTools";
+import { useApp, type Placing } from "../store";
+import PlacementOverlay from "./PlacementOverlay";
 
 interface Props {
   docId: number;
@@ -18,15 +20,37 @@ interface Props {
   hits: SearchHit[];
   currentHit: SearchHit | null;
   onGoTo: (page: number) => void;
+  /** The picture being positioned, when it is on this page. */
+  placing: Placing | null;
+  /** Outline the images on this page so they can be deleted or replaced. */
+  imageMode: boolean;
 }
 
-function PageView({ docId, version, index, size, scale, top, hits, currentHit, onGoTo }: Props) {
+function PageView({ docId, version, index, size, scale, top, hits, currentHit, onGoTo, placing, imageMode }: Props) {
   const lang = useApp((s) => s.lang);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const [drawn, setDrawn] = useState(false);
   const [lines, setLines] = useState<TextLine[] | null>(null);
   const [links, setLinks] = useState<PageLink[]>([]);
+  const [images, setImages] = useState<PageImage[]>([]);
+  const [picked, setPicked] = useState<number | null>(null);
+
+  // Images already on the page, only while the image tool is on.
+  useEffect(() => {
+    setPicked(null);
+    if (!imageMode) {
+      setImages([]);
+      return;
+    }
+    let cancelled = false;
+    pageImages(docId, index)
+      .then((list) => !cancelled && setImages(list))
+      .catch(() => !cancelled && setImages([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [docId, index, version, imageMode]);
   const width = size[0] * scale;
   const height = size[1] * scale;
 
@@ -131,6 +155,36 @@ function PageView({ docId, version, index, size, scale, top, hits, currentHit, o
           <span key={i} className="pdf-link external" style={box(link.rect)} title={`${t(lang, "externalLink")} ${link.uri}`} />
         ) : null,
       )}
+
+      {imageMode && images.length === 0 && <div className="no-images">{t(lang, "noImagesHere")}</div>}
+      {images.map((img, i) => (
+        <button
+          key={i}
+          className={picked === i ? "page-image picked" : "page-image"}
+          style={box(img.rect)}
+          aria-label={`${t(lang, "imageWord")} ${i + 1}`}
+          onClick={() => setPicked(picked === i ? null : i)}
+        />
+      ))}
+      {picked !== null && images[picked] && (
+        <div
+          className="image-menu"
+          style={{ left: images[picked].rect[0] * scale, top: Math.min(images[picked].rect[3] * scale + 6, height - 40) }}
+        >
+          {images[picked].xref !== null ? (
+            <>
+              <button onClick={() => replaceExistingImage(docId, index, images[picked].xref!)}>{t(lang, "replaceImage")}</button>
+              <button className="danger" onClick={() => deleteExistingImage(docId, index, images[picked].xref!)}>
+                {t(lang, "deleteImage")}
+              </button>
+            </>
+          ) : (
+            <span className="muted small">{t(lang, "imageNotEditable")}</span>
+          )}
+        </div>
+      )}
+
+      {placing && <PlacementOverlay docId={docId} placing={placing} scale={scale} pageSize={size} />}
     </div>
   );
 }

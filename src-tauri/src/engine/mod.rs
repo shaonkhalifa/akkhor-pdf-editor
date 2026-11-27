@@ -4,9 +4,11 @@
 pub mod edit;
 pub mod extract;
 pub mod fonts;
+pub mod images;
 pub mod layout;
 pub mod pages;
 pub mod render;
 pub mod script;
 pub mod selftest;
+pub mod signatures;
 pub mod viewer;

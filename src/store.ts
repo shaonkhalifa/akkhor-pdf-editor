@@ -1,6 +1,6 @@
 // App state: open tabs, the active tab and interface language.
 import { create } from "zustand";
-import type { DocInfo, SearchHit } from "./api";
+import type { DocInfo, Placement, SearchHit } from "./api";
 import type { Lang } from "./i18n";
 
 export type ZoomMode = "custom" | "fit-width" | "fit-page";
@@ -22,6 +22,18 @@ export interface Tab {
   selected: number[];
   /** Where a Shift+click range selection starts. */
   selectAnchor: number;
+  /** A picture being positioned, if any. */
+  placing: Placing | null;
+  /** Show the images already on the pages, to delete or replace them. */
+  imageMode: boolean;
+}
+
+/** A picture being positioned on a page before it is placed. */
+export interface Placing extends Placement {
+  dataUrl: string;
+  page: number;
+  /** Width / height of the picture, kept while resizing. */
+  aspect: number;
 }
 
 export type Screen = "home" | "doc" | "selftest";
@@ -95,6 +107,8 @@ export const useApp = create<State>((set) => ({
           sidebar: doc.page_count > 1 ? "pages" : null,
           selected: [],
           selectAnchor: 0,
+          placing: null,
+          imageMode: false,
         },
       ],
       activeId: doc.id,

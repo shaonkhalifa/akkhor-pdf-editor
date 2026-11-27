@@ -1,6 +1,6 @@
 [package]
 name = "akkhor-pdf-editor"
-version = "0.3.0"
+version = "0.4.0"
 description = "Free, open-source, offline Bangla & English PDF editor"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/shaonkhalifa/akkhor-pdf-editor"
@@ -27,6 +27,14 @@ mupdf = { version = "0.8.0", default-features = false, features = ["html", "img"
 anyhow = "1"
 tempfile = "3"
 tauri-plugin-dialog = "2"
+# Decode PNG, JPEG and WebP; shrink large photos; clean up signature photos.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+base64 = "0.23"
+
+# Saved signatures are encrypted with Windows' own data protection (DPAPI),
+# tied to the user's Windows login.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
 
 [dev-dependencies]
 png = "0.17"
