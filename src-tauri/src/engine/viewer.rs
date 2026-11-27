@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
 
 use super::extract::display_list_lines;
 use super::images::{self, PageImage};
+use super::layout::Style;
+use super::textedit::{self, Markup, TextBlock, TextPlacement};
 use super::pages;
 
 /// Recorded pages kept per document. A page is re-recorded if evicted.
@@ -78,6 +80,11 @@ pub enum PageEdit {
     PlaceImage { page: i32, bytes: Vec<u8>, placement: images::Placement },
     DeleteImage { page: i32, xref: i32 },
     ReplaceImage { page: i32, xref: i32, bytes: Vec<u8> },
+    /// Replace a block of text, or add a new text box (no `remove` boxes).
+    PlaceText { page: i32, text: String, style: Style, placement: TextPlacement },
+    Markup { page: i32, markup: Markup, rect: [f32; 4], color: [u8; 3] },
+    /// Remove everything in an area for good, under a black box.
+    Redact { page: i32, rect: [f32; 4] },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -168,6 +175,11 @@ enum Job {
         id: u64,
         page: i32,
         reply: Sender<Result<Vec<PageImage>>>,
+    },
+    Blocks {
+        id: u64,
+        page: i32,
+        reply: Sender<Result<Vec<TextBlock>>>,
     },
 }
 
@@ -269,6 +281,10 @@ impl Viewer {
                             let result = entry(&mut docs, id).and_then(|e| images::page_images(&e.doc, page));
                             let _ = reply.send(result);
                         }
+                        Job::Blocks { id, page, reply } => {
+                            let result = entry(&mut docs, id).and_then(|e| textedit::text_blocks(&e.doc, page));
+                            let _ = reply.send(result);
+                        }
                         Job::Snapshot { id, reply } => {
                             let result =
                                 entry(&mut docs, id).and_then(|e| Ok((e.current_bytes()?, e.password.clone())));
@@ -309,6 +325,11 @@ impl Viewer {
     /// Images drawn on a page, and which of them can be deleted or replaced.
     pub fn images(&self, id: u64, page: i32) -> Result<Vec<PageImage>> {
         self.ask(|reply| Job::Images { id, page, reply })?
+    }
+
+    /// The text blocks on a page, for editing.
+    pub fn text_blocks(&self, id: u64, page: i32) -> Result<Vec<TextBlock>> {
+        self.ask(|reply| Job::Blocks { id, page, reply })?
     }
 
     /// Copy some pages of the document, as it is now, into a new PDF file.
@@ -595,6 +616,17 @@ impl Entry {
             }
             PageEdit::ReplaceImage { page, xref, bytes } => {
                 self.check_page(page).and_then(|_| images::replace_image(&mut self.doc, page, xref, &bytes))
+            }
+            PageEdit::PlaceText { page, text, style, placement } => self
+                .check_page(page)
+                .and_then(|_| textedit::place_text(&mut self.doc, page, &text, &style, &placement))
+                .map(|_| ()),
+            PageEdit::Markup { page, markup, rect, color } => self
+                .check_page(page)
+                .and_then(|_| textedit::markup(&mut self.doc, page, markup, rect, color))
+                .map(|_| ()),
+            PageEdit::Redact { page, rect } => {
+                self.check_page(page).and_then(|_| textedit::redact(&mut self.doc, page, rect))
             }
         };
         if let Err(e) = result {

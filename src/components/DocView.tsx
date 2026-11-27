@@ -16,6 +16,28 @@ import SignatureDialog from "./SignatureDialog";
 import SplitDialog from "./SplitDialog";
 import StampDialog from "./StampDialog";
 import { insertPicture } from "../insertTools";
+import { setTool } from "../textTools";
+import type { Tool } from "../store";
+import type { Key } from "../i18n";
+
+const TOOL_BANNERS: Record<Exclude<Tool, "none">, Key> = {
+  text: "editTextBanner",
+  addtext: "addTextBanner",
+  highlight: "markBanner",
+  underline: "markBanner",
+  strike: "markBanner",
+  redact: "redactBanner",
+  images: "editImagesBanner",
+};
+
+const TEXT_TOOLS: { tool: Tool; icon: "editText" | "addText" | "highlight" | "underline" | "strike" | "redact"; key: Key }[] = [
+  { tool: "text", icon: "editText", key: "editText" },
+  { tool: "addtext", icon: "addText", key: "addText" },
+  { tool: "highlight", icon: "highlight", key: "highlight" },
+  { tool: "underline", icon: "underline", key: "underline" },
+  { tool: "strike", icon: "strike", key: "strike" },
+  { tool: "redact", icon: "redact", key: "redact" },
+];
 
 const GAP = 16; // px between pages
 const PAD = 24; // px around the page column
@@ -354,6 +376,20 @@ export default function DocView({ tab }: { tab: Tab }) {
         </form>
 
         <span className="sep" />
+        {TEXT_TOOLS.map((x) => (
+          <button
+            key={x.tool}
+            className={tab.tool === x.tool ? (x.tool === "text" || x.tool === "addtext" ? "tool text on" : "tool icon on") : x.tool === "text" || x.tool === "addtext" ? "tool text" : "tool icon"}
+            aria-pressed={tab.tool === x.tool}
+            title={t(lang, x.key)}
+            aria-label={t(lang, x.key)}
+            onClick={() => setTool(doc.id, x.tool)}
+          >
+            <Icon name={x.icon} size={16} />
+            {(x.tool === "text" || x.tool === "addtext") && ` ${t(lang, x.key)}`}
+          </button>
+        ))}
+        <span className="sep" />
         <button className="tool text" onClick={() => insertPicture(doc.id)} title={t(lang, "insertPictureHint")}>
           <Icon name="picture" size={16} /> {t(lang, "picture")}
         </button>
@@ -364,9 +400,9 @@ export default function DocView({ tab }: { tab: Tab }) {
           <Icon name="stamp" size={16} /> {t(lang, "stamp")}
         </button>
         <button
-          className={tab.imageMode ? "tool text on" : "tool text"}
-          aria-pressed={tab.imageMode}
-          onClick={() => update(doc.id, { imageMode: !tab.imageMode, placing: null })}
+          className={tab.tool === "images" ? "tool text on" : "tool text"}
+          aria-pressed={tab.tool === "images"}
+          onClick={() => setTool(doc.id, "images")}
           title={t(lang, "editImagesHint")}
         >
           <Icon name="images" size={16} /> {t(lang, "editImages")}
@@ -404,7 +440,8 @@ export default function DocView({ tab }: { tab: Tab }) {
                 currentHit={currentHit && currentHit.page === i ? currentHit : null}
                 onGoTo={goTo}
                 placing={tab.placing && tab.placing.page === i ? tab.placing : null}
-                imageMode={tab.imageMode}
+                tool={tab.tool}
+                editing={tab.editing && tab.editing.page === i ? tab.editing : null}
               />
             ))}
           </div>
@@ -425,7 +462,14 @@ export default function DocView({ tab }: { tab: Tab }) {
       {splitting && <SplitDialog doc={doc} onClose={() => setSplitting(false)} />}
       {dialog === "signature" && <SignatureDialog docId={doc.id} onClose={() => setDialog(null)} />}
       {dialog === "stamp" && <StampDialog docId={doc.id} onClose={() => setDialog(null)} />}
-      {tab.imageMode && <div className="mode-banner">{t(lang, "editImagesBanner")}</div>}
+      {tab.tool !== "none" && !tab.editing && (
+        <div className="mode-banner">
+          {t(lang, TOOL_BANNERS[tab.tool])}
+          <button className="banner-done" onClick={() => setTool(doc.id, tab.tool)}>
+            {t(lang, "done")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 // App state: open tabs, the active tab and interface language.
 import { create } from "zustand";
-import type { DocInfo, Placement, SearchHit } from "./api";
+import type { DocInfo, Placement, SearchHit, StyleChoice, TextBlock } from "./api";
 import type { Lang } from "./i18n";
 
 export type ZoomMode = "custom" | "fit-width" | "fit-page";
@@ -24,8 +24,10 @@ export interface Tab {
   selectAnchor: number;
   /** A picture being positioned, if any. */
   placing: Placing | null;
-  /** Show the images already on the pages, to delete or replace them. */
-  imageMode: boolean;
+  /** What clicking or dragging on a page does. */
+  tool: Tool;
+  /** Text being edited, if any. */
+  editing: Editing | null;
 }
 
 /** A picture being positioned on a page before it is placed. */
@@ -34,6 +36,22 @@ export interface Placing extends Placement {
   page: number;
   /** Width / height of the picture, kept while resizing. */
   aspect: number;
+}
+
+/** What a click or drag on a page does. */
+export type Tool = "none" | "text" | "addtext" | "highlight" | "underline" | "strike" | "redact" | "images";
+
+/** Text being edited in place: an existing block, or a new text box. */
+export interface Editing {
+  page: number;
+  /** The block being changed; null for a new text box. */
+  block: TextBlock | null;
+  left: number;
+  /** Top of a new box, in points. */
+  top: number;
+  width: number;
+  text: string;
+  style: StyleChoice;
 }
 
 export type Screen = "home" | "doc" | "selftest";
@@ -108,7 +126,8 @@ export const useApp = create<State>((set) => ({
           selected: [],
           selectAnchor: 0,
           placing: null,
-          imageMode: false,
+          tool: "none",
+          editing: null,
         },
       ],
       activeId: doc.id,

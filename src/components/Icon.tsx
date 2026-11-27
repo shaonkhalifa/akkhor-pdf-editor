@@ -15,6 +15,12 @@ const paths = {
   signature: "M3 17c3-1 4-9 6-9s0 9 2 9 2-4 4-4 1 3 3 3h3M3 21h18",
   stamp: "M9 3h6l-1 7h4l1 4H5l1-4h4zM5 17h14v3H5z",
   images: "M7 7h14v12H7zM3 3h14v2M3 3v12h2M7 16l4-4 3 3 2-2 5 5",
+  editText: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4M4 4h7",
+  addText: "M5 5h10M10 5v14M8 19h4M17 13v6M14 16h6",
+  highlight: "M4 20h16M7 16l2-6 8-6 3 3-6 8-6 2zM9 10l5 5",
+  underline: "M7 4v6a5 5 0 0 0 10 0V4M5 20h14",
+  strike: "M5 12h14M16 7c0-2-2-3-4-3s-4 1-4 3 2 3 4 3.5M8 16c0 2 2 4 4 4s4-1 4-3",
+  redact: "M3 6h18v12H3zM6 9h12v6H6z",
 } as const;
 
 export type IconName = keyof typeof paths;

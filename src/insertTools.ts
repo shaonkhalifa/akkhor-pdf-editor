@@ -39,7 +39,7 @@ export function startPlacing(id: number, dataUrl: string, pixelW: number, pixelH
     w = h * aspect;
   }
   const placing: Placing = { dataUrl, page, aspect, center: [pw / 2, ph / 2], size: [w, h], rotation: 0, opacity: 1 };
-  useApp.getState().update(id, { placing, imageMode: false });
+  useApp.getState().update(id, { placing, tool: "none", editing: null });
 }
 
 export function updatePlacing(id: number, patch: Partial<Placing>) {
