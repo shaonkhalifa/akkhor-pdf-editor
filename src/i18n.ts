@@ -21,8 +21,8 @@ const strings = {
   noRecent: { bn: "এখনো কোনো ফাইল খোলা হয়নি", en: "No files opened yet" },
   selfTest: { bn: "বাংলা শেপিং পরীক্ষা", en: "Bangla shaping self-test" },
   shortcuts: {
-    bn: "Ctrl+O খুলুন · Ctrl+F খুঁজুন · Ctrl+P প্রিন্ট · Ctrl+W বন্ধ",
-    en: "Ctrl+O open · Ctrl+F find · Ctrl+P print · Ctrl+W close",
+    bn: "Ctrl+O খুলুন · Ctrl+S সেভ · Ctrl+Z ফিরুন · Ctrl+F খুঁজুন · Ctrl+P প্রিন্ট · Ctrl+W বন্ধ",
+    en: "Ctrl+O open · Ctrl+S save · Ctrl+Z undo · Ctrl+F find · Ctrl+P print · Ctrl+W close",
   },
 
   // Viewer
@@ -38,7 +38,7 @@ const strings = {
   prev: { bn: "আগের", en: "Previous" },
   next: { bn: "পরের", en: "Next" },
   print: { bn: "প্রিন্ট", en: "Print" },
-  saveAs: { bn: "আলাদা সেভ", en: "Save As" },
+  saveAs: { bn: "অন্য নামে সেভ", en: "Save As" },
   saved: { bn: "সেভ হয়েছে", en: "Saved" },
   sidebar: { bn: "পাশের তালিকা", en: "Sidebar" },
   thumbnails: { bn: "পাতাগুলো", en: "Pages" },
@@ -66,6 +66,85 @@ const strings = {
   },
   cannotOpen: { bn: "ফাইলটি খোলা গেল না", en: "The file could not be opened" },
   pdfFiles: { bn: "PDF ফাইল", en: "PDF files" },
+
+  // Page tools (Phase 3)
+  undo: { bn: "আগের অবস্থায় ফিরুন", en: "Undo" },
+  redo: { bn: "আবার করুন", en: "Redo" },
+  save: { bn: "সেভ", en: "Save" },
+  rotateLeft: { bn: "বাঁয়ে ঘোরান", en: "Rotate left" },
+  rotateRight: { bn: "ডানে ঘোরান", en: "Rotate right" },
+  deletePages: { bn: "পাতা মুছুন", en: "Delete pages" },
+  insertBlank: { bn: "ফাঁকা পাতা যোগ করুন", en: "Insert blank page" },
+  insertFile: { bn: "অন্য PDF-এর পাতা যোগ করুন…", en: "Insert pages from a PDF…" },
+  extract: { bn: "বাছাই করা পাতা নতুন PDF-এ…", en: "Extract pages to a new PDF…" },
+  split: { bn: "ভাগ করুন", en: "Split" },
+  merge: { bn: "PDF জোড়া দিন", en: "Merge PDFs" },
+  selectedPages: { bn: "{n}টি পাতা বাছাই করা", en: "{n} pages selected" },
+  selectAll: { bn: "সব পাতা বাছাই", en: "Select all pages" },
+  dragHint: {
+    bn: "ক্লিক করে বাছাই করুন (Ctrl/Shift দিয়ে একাধিক), টেনে নিয়ে ক্রম বদলান",
+    en: "Click to select (Ctrl/Shift for more), drag to reorder",
+  },
+  cannotDeleteAll: {
+    bn: "সব পাতা মুছে ফেলা যায় না — PDF-এ অন্তত একটি পাতা থাকতে হয়।",
+    en: "You can't delete every page — a PDF needs at least one page.",
+  },
+  unsavedTitle: { bn: "সেভ করা হয়নি", en: "Unsaved changes" },
+  unsavedOne: {
+    bn: "“{name}”-এ পরিবর্তন সেভ করা হয়নি। বন্ধ করার আগে সেভ করবেন?",
+    en: "“{name}” has changes that are not saved. Save them before closing?",
+  },
+  unsavedMany: {
+    bn: "{n}টি ফাইলে সেভ না করা পরিবর্তন আছে। বন্ধ করার আগে সব সেভ করবেন?",
+    en: "{n} files have changes that are not saved. Save them all before closing?",
+  },
+  saveBtn: { bn: "সেভ করুন", en: "Save" },
+  dontSave: { bn: "সেভ করবেন না", en: "Don't save" },
+  cannotSave: { bn: "সেভ করা গেল না", en: "Could not save" },
+  extracted: { bn: "বাছাই করা পাতাগুলো নতুন PDF-এ সেভ হয়েছে", en: "The selected pages were saved as a new PDF" },
+  pagesSuffix: { bn: "পাতা", en: "pages" },
+
+  splitTitle: { bn: "PDF ভাগ করুন", en: "Split PDF" },
+  splitEvery: { bn: "প্রতি", en: "Every" },
+  splitEveryTail: { bn: "পাতায় একটি ফাইল", en: "pages make one file" },
+  splitRanges: { bn: "নিজের মতো পরিসর:", en: "Custom ranges:" },
+  rangesHint: { bn: "যেমন: 1-3, 4-10, 11-", en: "for example: 1-3, 4-10, 11-" },
+  splitEach: { bn: "প্রতিটি পাতা আলাদা ফাইল", en: "Each page as its own file" },
+  splitWillMake: { bn: "{n}টি ফাইল তৈরি হবে", en: "This makes {n} files" },
+  badRange: { bn: "পরিসরটি ঠিক নেই: {r} (পাতা ১ থেকে {n})", en: "This range isn't valid: {r} (pages 1 to {n})" },
+  chooseFolder: { bn: "ফোল্ডার বেছে নিয়ে ভাগ করুন…", en: "Choose a folder and split…" },
+  splitDone: { bn: "{n}টি ফাইল সেভ হয়েছে:\n{folder}", en: "{n} files saved in:\n{folder}" },
+  splitNote: {
+    bn: "নতুন ফাইলের নাম হবে “{stem} part 1.pdf”, “part 2” … আগের কোনো ফাইল মোছা হবে না।",
+    en: "Files are named “{stem} part 1.pdf”, “part 2” … Existing files are never overwritten.",
+  },
+
+  splitIncludesChanges: {
+    bn: "ফাইলগুলো এখনকার অবস্থা থেকে তৈরি হবে, সেভ না করা পরিবর্তনসহ।",
+    en: "The files use the document as it is now, including unsaved changes.",
+  },
+
+  mergeTitle: { bn: "PDF জোড়া দিন", en: "Merge PDFs" },
+  mergeIntro: {
+    bn: "ফাইলগুলো এই ক্রমে একটি নতুন PDF-এ জোড়া লাগবে। মূল ফাইলগুলো বদলাবে না।",
+    en: "The files are joined in this order into a new PDF. The original files are not changed.",
+  },
+  addFiles: { bn: "ফাইল যোগ করুন…", en: "Add files…" },
+  moveUp: { bn: "উপরে", en: "Move up" },
+  moveDown: { bn: "নিচে", en: "Move down" },
+  remove: { bn: "সরান", en: "Remove" },
+  mergeSave: { bn: "জোড়া দিয়ে সেভ করুন…", en: "Merge and save…" },
+  mergeNeedTwo: { bn: "অন্তত দুটি ফাইল যোগ করুন", en: "Add at least two files" },
+  mergeUnsaved: {
+    bn: "“{name}”-এর সেভ না করা পরিবর্তন এতে থাকবে না — আগে সেভ করুন।",
+    en: "Unsaved changes in “{name}” won't be included — save it first.",
+  },
+  saveOverInput: {
+    bn: "যে ফাইলগুলো জোড়া দিচ্ছেন, তার কোনোটির উপরে সেভ করা যাবে না। অন্য নাম দিন।",
+    en: "You can't save over one of the files being merged. Choose another name.",
+  },
+  merged: { bn: "merged", en: "merged" },
+  working: { bn: "কাজ চলছে…", en: "Working…" },
 
   // Self-test (Phase 1)
   phase: { bn: "বাংলা শেপিং পরীক্ষা", en: "Bangla shaping self-test" },

@@ -16,12 +16,31 @@ export interface DocInfo {
   pages: [number, number][];
   outline: OutlineItem[];
   file_size: number;
+  /** Goes up on every change; pages must be redrawn when it changes. */
+  version: number;
+  /** Changes not yet saved to `path`. */
+  dirty: boolean;
+  can_undo: boolean;
+  can_redo: boolean;
 }
+
+/** A change to the pages of an open document. Page numbers are zero-based. */
+export type PageEdit =
+  | { kind: "rotate"; pages: number[]; degrees: number }
+  | { kind: "delete"; pages: number[] }
+  | { kind: "move"; pages: number[]; before: number }
+  | { kind: "reorder"; order: number[] }
+  | { kind: "insert_blank"; at: number; size: [number, number] }
+  | { kind: "insert_file"; at: number; path: string; password?: string | null };
+
+export type SplitPlan = { mode: "every"; n: number } | { mode: "ranges"; text: string };
 
 export interface TextLine {
   text: string;
   rect: [number, number, number, number];
   size: number;
+  /** Writing direction, clockwise: 0 (left to right), 90, 180 or 270. */
+  angle: number;
 }
 
 export interface PageLink {
@@ -47,7 +66,28 @@ export const pageLinks = (id: number, page: number) => invoke<PageLink[]>("page_
 export const searchPdf = (id: number, pageCount: number, needle: string) =>
   invoke<SearchHit[]>("search_pdf", { id, pageCount, needle });
 
-export const saveCopy = (id: number, dest: string) => invoke<void>("save_copy", { id, dest });
+// --- Page tools (Phase 3) ----------------------------------------------------
+
+export const editPages = (id: number, edit: PageEdit) => invoke<DocInfo>("edit_pages", { id, edit });
+
+export const undoEdit = (id: number) => invoke<DocInfo>("undo", { id });
+
+export const redoEdit = (id: number) => invoke<DocInfo>("redo", { id });
+
+/** Save to the document's own file, or to `dest` (Save As). */
+export const savePdf = (id: number, dest?: string) => invoke<DocInfo>("save_pdf", { id, dest });
+
+export const extractPages = (id: number, pages: number[], dest: string) =>
+  invoke<void>("extract_pages", { id, pages, dest });
+
+export const splitPdf = (id: number, pageCount: number, plan: SplitPlan, dir: string, stem: string) =>
+  invoke<string[]>("split_pdf", { id, pageCount, plan, dir, stem });
+
+export const mergePdfs = (files: { path: string; password?: string | null }[], dest: string) =>
+  invoke<void>("merge_pdfs", { files, dest });
+
+/** Check a file opens as a PDF; returns its page count. Fails with NEEDS_PASSWORD / WRONG_PASSWORD. */
+export const probePdf = (path: string, password?: string | null) => invoke<number>("probe_pdf", { path, password });
 
 export const recentFiles = () => invoke<string[]>("recent_files");
 
@@ -78,8 +118,10 @@ async function slot<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /** Draw a page; `scale` is device pixels per PDF point. */
-export function renderPage(id: number, page: number, scale: number): Promise<ImageBitmap> {
+export function renderPage(id: number, page: number, scale: number, version = 0): Promise<ImageBitmap> {
   return slot(async () => {
+    // `version` is only there so callers redraw after a change.
+    void version;
     const buf = await invoke<ArrayBuffer>("render_page", { id, page, scale });
     const view = new DataView(buf);
     const w = view.getUint32(0, true);

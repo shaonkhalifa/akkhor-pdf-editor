@@ -1,10 +1,15 @@
-//! The PDF viewer engine (SRS Modules 1 and 2).
+//! The PDF viewer engine (SRS Modules 1 and 2) and page tools (Module 3).
 //!
 //! MuPDF documents can only be used from the thread that opened them, but a
 //! recorded page (a `DisplayList`) can be drawn, searched and read from any
 //! thread. So one engine thread owns every open document and records pages on
 //! request; drawing at any zoom, text extraction and search then run in
 //! parallel on other threads (SRS 4.1: render on background threads).
+//!
+//! Page changes also run on the engine thread. Before each change the
+//! document is saved to memory, so every change can be undone. Files are read
+//! into memory when opened, so the app never keeps the file open and can save
+//! over it safely.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -12,17 +17,22 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use mupdf::pdf::{PdfDocument, PdfWriteOptions};
 use mupdf::{Colorspace, DisplayList, Document, ImageFormat, Matrix, Outline, Quad};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::extract::display_list_lines;
-use super::layout::mupdf_path;
+use super::pages;
 
 /// Recorded pages kept per document. A page is re-recorded if evicted.
 const LISTS_PER_DOC: usize = 96;
 /// Search stops collecting hits on a page after this many.
 const HITS_PER_PAGE: u32 = 500;
+/// Undo steps kept per document.
+const UNDO_STEPS: usize = 50;
+/// Undo history is trimmed (oldest first) once it uses more memory than this.
+const UNDO_BYTES: usize = 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OutlineItem {
@@ -42,6 +52,27 @@ pub struct DocInfo {
     pub pages: Vec<[f32; 2]>,
     pub outline: Vec<OutlineItem>,
     pub file_size: u64,
+    /// Goes up on every change, so the UI knows to redraw pages.
+    pub version: u64,
+    /// There are changes not yet saved to `path`.
+    pub dirty: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
+}
+
+/// A change to the pages of an open document. Page numbers are zero-based.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PageEdit {
+    /// Turn pages clockwise by a multiple of 90 degrees (negative: anticlockwise).
+    Rotate { pages: Vec<i32>, degrees: i32 },
+    Delete { pages: Vec<i32> },
+    /// Move pages (keeping their order) to just before the page now at `before`.
+    Move { pages: Vec<i32>, before: i32 },
+    /// A full new order: `order[i]` is the current page that goes to position i.
+    Reorder { order: Vec<i32> },
+    InsertBlank { at: i32, size: [f32; 2] },
+    InsertFile { at: i32, path: PathBuf, password: Option<String> },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +91,8 @@ pub struct TextLine {
     /// x0, y0, x1, y1 in page points.
     pub rect: [f32; 4],
     pub size: f32,
+    /// Writing direction, clockwise: 0 (left to right), 90 (top to bottom), 180 or 270.
+    pub angle: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -107,13 +140,50 @@ enum Job {
         page: i32,
         reply: Sender<Result<Vec<PageLink>>>,
     },
+    Edit {
+        id: u64,
+        edit: PageEdit,
+        reply: Sender<Result<DocInfo>>,
+    },
+    Step {
+        id: u64,
+        redo: bool,
+        reply: Sender<Result<DocInfo>>,
+    },
+    Save {
+        id: u64,
+        dest: Option<PathBuf>,
+        reply: Sender<Result<DocInfo>>,
+    },
+    Snapshot {
+        id: u64,
+        reply: Sender<Result<(Arc<Vec<u8>>, Option<String>)>>,
+    },
+}
+
+/// One earlier state of a document, for undo and redo.
+struct Snapshot {
+    state: u64,
+    bytes: Arc<Vec<u8>>,
 }
 
 struct Entry {
-    doc: Document,
+    doc: PdfDocument,
+    path: PathBuf,
+    password: Option<String>,
+    file_size: u64,
     page_count: i32,
     lists: HashMap<i32, Arc<DisplayList>>,
     recent: VecDeque<i32>,
+    /// Which state the document is in; every change makes a new one.
+    state: u64,
+    /// The state last saved to (or opened from) `path`.
+    saved_state: u64,
+    /// The current state as bytes, if already known (saves writing it again).
+    current: Option<Arc<Vec<u8>>>,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    version: u64,
 }
 
 /// Handle to the engine thread. Cheap to share between threads.
@@ -139,19 +209,30 @@ impl Viewer {
                 for job in rx {
                     match job {
                         Job::Open { path, password, reply } => {
-                            let result = open_document(&path, password.as_deref()).map(|(doc, mut info)| {
-                                info.id = next_id;
+                            let result = open_document(&path, password.as_deref()).and_then(|(doc, bytes)| {
+                                let id = next_id;
                                 next_id += 1;
-                                docs.insert(
-                                    info.id,
-                                    Entry {
-                                        doc,
-                                        page_count: info.page_count,
-                                        lists: HashMap::new(),
-                                        recent: VecDeque::new(),
-                                    },
-                                );
-                                info
+                                let state = new_state();
+                                let entry = docs.entry(id).or_insert(Entry {
+                                    doc,
+                                    path,
+                                    password,
+                                    file_size: bytes.len() as u64,
+                                    page_count: 0,
+                                    lists: HashMap::new(),
+                                    recent: VecDeque::new(),
+                                    state,
+                                    saved_state: state,
+                                    current: Some(Arc::new(bytes)),
+                                    undo: Vec::new(),
+                                    redo: Vec::new(),
+                                    version: 0,
+                                });
+                                let info = entry.info(id);
+                                if info.is_err() {
+                                    docs.remove(&id);
+                                }
+                                info.map_err(OpenError::Failed)
                             });
                             let _ = reply.send(result);
                         }
@@ -162,10 +243,21 @@ impl Viewer {
                             let _ = reply.send(record_page(&mut docs, id, page));
                         }
                         Job::Links { id, page, reply } => {
-                            let result = docs
-                                .get(&id)
-                                .ok_or_else(|| anyhow!("document {id} is not open"))
-                                .and_then(|e| page_links(&e.doc, page));
+                            let result = entry(&mut docs, id).and_then(|e| page_links(&e.doc, page));
+                            let _ = reply.send(result);
+                        }
+                        Job::Edit { id, edit, reply } => {
+                            let _ = reply.send(entry(&mut docs, id).and_then(|e| e.apply(edit, id)));
+                        }
+                        Job::Step { id, redo, reply } => {
+                            let _ = reply.send(entry(&mut docs, id).and_then(|e| e.step(redo, id)));
+                        }
+                        Job::Save { id, dest, reply } => {
+                            let _ = reply.send(entry(&mut docs, id).and_then(|e| e.save(dest, id)));
+                        }
+                        Job::Snapshot { id, reply } => {
+                            let result =
+                                entry(&mut docs, id).and_then(|e| Ok((e.current_bytes()?, e.password.clone())));
                             let _ = reply.send(result);
                         }
                     }
@@ -179,6 +271,38 @@ impl Viewer {
         let (reply, rx) = channel();
         self.tx.send(make(reply)).map_err(|_| anyhow!("PDF engine stopped"))?;
         rx.recv().map_err(|_| anyhow!("PDF engine stopped"))
+    }
+
+    /// Change the pages of an open document. Every change can be undone.
+    pub fn edit(&self, id: u64, edit: PageEdit) -> Result<DocInfo> {
+        self.ask(|reply| Job::Edit { id, edit, reply })?
+    }
+
+    pub fn undo(&self, id: u64) -> Result<DocInfo> {
+        self.ask(|reply| Job::Step { id, redo: false, reply })?
+    }
+
+    pub fn redo(&self, id: u64) -> Result<DocInfo> {
+        self.ask(|reply| Job::Step { id, redo: true, reply })?
+    }
+
+    /// Save to the document's own file, or to `dest` (Save As: the document
+    /// then belongs to `dest`).
+    pub fn save(&self, id: u64, dest: Option<PathBuf>) -> Result<DocInfo> {
+        self.ask(|reply| Job::Save { id, dest, reply })?
+    }
+
+    /// Copy some pages of the document, as it is now, into a new PDF file.
+    pub fn extract_to(&self, id: u64, pages: &[i32], dest: &Path) -> Result<()> {
+        let (bytes, password) = self.ask(|reply| Job::Snapshot { id, reply })??;
+        let out = pages::extract(&bytes, password.as_deref(), pages)?;
+        pages::write_file_safely(dest, &out)
+    }
+
+    /// Split the document, as it is now, into one file per group of pages.
+    pub fn split_to(&self, id: u64, groups: &[Vec<i32>], dir: &Path, stem: &str) -> Result<Vec<PathBuf>> {
+        let (bytes, password) = self.ask(|reply| Job::Snapshot { id, reply })??;
+        pages::split(&bytes, password.as_deref(), groups, dir, stem)
     }
 
     pub fn open(&self, path: &Path, password: Option<String>) -> Result<DocInfo, OpenError> {
@@ -225,6 +349,7 @@ impl Viewer {
                 text: l.text,
                 rect: [l.bbox.x0, l.bbox.y0, l.bbox.x1, l.bbox.y1],
                 size: l.size,
+                angle: l.angle,
             })
             .collect())
     }
@@ -250,8 +375,8 @@ impl Viewer {
                 .map(|q| q.iter().map(quad_rect).collect())
                 .unwrap_or_default();
             for line in display_list_lines(&list)? {
-                for rect in line_matches(&line.text, &needle, line.bbox) {
-                    let better = exact.iter().find(|q| {
+                for rect in line_matches(&line.text, &needle, line.bbox, line.angle) {
+                    let better = exact.iter().filter(|_| line.angle == 0).find(|q| {
                         let overlap_x = q[2].min(rect[2]) - q[0].max(rect[0]);
                         let same_row = q[1] < rect[3] && q[3] > rect[1];
                         same_row && overlap_x > 0.0 && (q[2] - q[0]) >= 0.6 * (rect[2] - rect[0])
@@ -271,21 +396,26 @@ fn fold(s: &str) -> Vec<char> {
 }
 
 /// Boxes for every occurrence of `needle` in a line, estimated by spreading
-/// the line's characters evenly across its glyph box.
-fn line_matches(text: &str, needle: &[char], bbox: mupdf::Rect) -> Vec<[f32; 4]> {
+/// the line's characters evenly along its glyph box, in its writing direction.
+fn line_matches(text: &str, needle: &[char], bbox: mupdf::Rect, angle: i32) -> Vec<[f32; 4]> {
     let hay = fold(text);
     let n = hay.len();
     if needle.len() > n || n == 0 {
         return Vec::new();
     }
-    let width = bbox.x1 - bbox.x0;
+    let vertical = angle == 90 || angle == 270;
+    let reversed = angle == 180 || angle == 270;
+    let (start, len) = if vertical { (bbox.y0, bbox.y1 - bbox.y0) } else { (bbox.x0, bbox.x1 - bbox.x0) };
     let mut out = Vec::new();
     let mut i = 0;
     while i + needle.len() <= n {
         if hay[i..i + needle.len()] == *needle {
-            let x0 = bbox.x0 + width * i as f32 / n as f32;
-            let x1 = bbox.x0 + width * (i + needle.len()) as f32 / n as f32;
-            out.push([x0, bbox.y0, x1, bbox.y1]);
+            let (mut a, mut b) = (i as f32 / n as f32, (i + needle.len()) as f32 / n as f32);
+            if reversed {
+                (a, b) = (1.0 - b, 1.0 - a);
+            }
+            let (lo, hi) = (start + len * a, start + len * b);
+            out.push(if vertical { [bbox.x0, lo, bbox.x1, hi] } else { [lo, bbox.y0, hi, bbox.y1] });
             i += needle.len();
         } else {
             i += 1;
@@ -324,12 +454,11 @@ pub fn render_rgba(list: &DisplayList, scale: f32) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn open_document(path: &Path, password: Option<&str>) -> Result<(Document, DocInfo), OpenError> {
-    let file_size = std::fs::metadata(path)
+fn open_document(path: &Path, password: Option<&str>) -> Result<(PdfDocument, Vec<u8>), OpenError> {
+    let bytes = std::fs::read(path)
         .with_context(|| format!("reading {}", path.display()))
-        .map_err(OpenError::Failed)?
-        .len();
-    let mut doc = Document::open(&mupdf_path(path).map_err(OpenError::Failed)?)
+        .map_err(OpenError::Failed)?;
+    let mut doc = PdfDocument::from_bytes(&bytes)
         .map_err(|e| OpenError::Failed(anyhow!("this file could not be opened as a PDF ({e})")))?;
     if doc.needs_password().map_err(|e| OpenError::Failed(e.into()))? {
         match password {
@@ -341,30 +470,141 @@ fn open_document(path: &Path, password: Option<&str>) -> Result<(Document, DocIn
             }
         }
     }
-    let info = describe(&doc, path, file_size).map_err(OpenError::Failed)?;
-    Ok((doc, info))
+    Ok((doc, bytes))
 }
 
-fn describe(doc: &Document, path: &Path, file_size: u64) -> Result<DocInfo> {
-    let page_count = doc.page_count()?;
-    let mut pages = Vec::with_capacity(page_count.max(0) as usize);
-    for i in 0..page_count {
-        let b = doc.load_page(i)?.bounds()?;
-        pages.push([b.x1 - b.x0, b.y1 - b.y0]);
+/// Load an earlier state back (undo, redo, or after a failed change).
+fn load_state(bytes: &[u8], password: Option<&str>) -> Result<PdfDocument> {
+    let mut doc = PdfDocument::from_bytes(bytes)?;
+    if doc.needs_password()? && !password.is_some_and(|pw| doc.authenticate(pw).unwrap_or(false)) {
+        bail!("the saved state could not be unlocked");
     }
-    let outline = doc.outlines().map(|o| convert_outline(&o)).unwrap_or_default();
-    Ok(DocInfo {
-        id: 0,
-        path: path.to_string_lossy().into_owned(),
-        name: path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "document.pdf".into()),
-        page_count,
-        pages,
-        outline,
-        file_size,
-    })
+    Ok(doc)
+}
+
+fn entry(docs: &mut HashMap<u64, Entry>, id: u64) -> Result<&mut Entry> {
+    docs.get_mut(&id).ok_or_else(|| anyhow!("document {id} is not open"))
+}
+
+static STATE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn new_state() -> u64 {
+    STATE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+impl Entry {
+    fn info(&mut self, id: u64) -> Result<DocInfo> {
+        let doc: &Document = &self.doc;
+        let page_count = doc.page_count()?;
+        let mut sizes = Vec::with_capacity(page_count.max(0) as usize);
+        for i in 0..page_count {
+            let b = doc.load_page(i)?.bounds()?;
+            sizes.push([b.x1 - b.x0, b.y1 - b.y0]);
+        }
+        let outline = doc.outlines().map(|o| convert_outline(&o)).unwrap_or_default();
+        self.page_count = page_count;
+        Ok(DocInfo {
+            id,
+            path: self.path.to_string_lossy().into_owned(),
+            name: self
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "document.pdf".into()),
+            page_count,
+            pages: sizes,
+            outline,
+            file_size: self.file_size,
+            version: self.version,
+            dirty: self.state != self.saved_state,
+            can_undo: !self.undo.is_empty(),
+            can_redo: !self.redo.is_empty(),
+        })
+    }
+
+    /// The current state as bytes. Written quickly (no clean-up or
+    /// compression); only used in memory.
+    fn current_bytes(&mut self) -> Result<Arc<Vec<u8>>> {
+        if let Some(b) = &self.current {
+            return Ok(Arc::clone(b));
+        }
+        let bytes = Arc::new(pages::to_bytes(&self.doc, PdfWriteOptions::default())?);
+        self.current = Some(Arc::clone(&bytes));
+        Ok(bytes)
+    }
+
+    /// Forget recorded pages and tell the UI to redraw.
+    fn changed(&mut self) {
+        self.lists.clear();
+        self.recent.clear();
+        self.version += 1;
+    }
+
+    fn trim_undo(&mut self) {
+        let total = |u: &[Snapshot]| u.iter().map(|s| s.bytes.len()).sum::<usize>();
+        while self.undo.len() > UNDO_STEPS || (self.undo.len() > 1 && total(&self.undo) > UNDO_BYTES) {
+            self.undo.remove(0);
+        }
+    }
+
+    fn apply(&mut self, edit: PageEdit, id: u64) -> Result<DocInfo> {
+        let before = self.current_bytes()?;
+        let result = match edit {
+            PageEdit::Rotate { pages, degrees } => pages::rotate(&mut self.doc, &pages, degrees),
+            PageEdit::Delete { pages } => pages::delete(&mut self.doc, &pages),
+            PageEdit::Move { pages, before } => {
+                let order = pages::order_for_move(self.page_count, &pages, before);
+                pages::reorder(&mut self.doc, &order)
+            }
+            PageEdit::Reorder { order } => pages::reorder(&mut self.doc, &order),
+            PageEdit::InsertBlank { at, size } => pages::insert_blank(&mut self.doc, at, size),
+            PageEdit::InsertFile { at, path, password } => pages::load(&path, password.as_deref())
+                .and_then(|other| pages::insert_document(&mut self.doc, at, &other))
+                .map(|_| ()),
+        };
+        if let Err(e) = result {
+            // A change that fails half way must not leave a half-changed document.
+            self.doc = load_state(&before, self.password.as_deref())?;
+            self.changed();
+            return Err(e);
+        }
+        self.undo.push(Snapshot { state: self.state, bytes: before });
+        self.trim_undo();
+        self.redo.clear();
+        self.state = new_state();
+        self.current = None;
+        self.changed();
+        self.info(id)
+    }
+
+    fn step(&mut self, redo: bool, id: u64) -> Result<DocInfo> {
+        let Some(target) = (if redo { self.redo.pop() } else { self.undo.pop() }) else {
+            bail!(if redo { "NOTHING_TO_REDO" } else { "NOTHING_TO_UNDO" });
+        };
+        let now = Snapshot { state: self.state, bytes: self.current_bytes()? };
+        match load_state(&target.bytes, self.password.as_deref()) {
+            Ok(doc) => self.doc = doc,
+            Err(e) => {
+                if redo { self.redo.push(target) } else { self.undo.push(target) }
+                return Err(e);
+            }
+        }
+        if redo { self.undo.push(now) } else { self.redo.push(now) }
+        self.state = target.state;
+        self.current = Some(target.bytes);
+        self.changed();
+        self.info(id)
+    }
+
+    fn save(&mut self, dest: Option<PathBuf>, id: u64) -> Result<DocInfo> {
+        let dest = dest.unwrap_or_else(|| self.path.clone());
+        let bytes = pages::to_bytes(&self.doc, pages::save_options())?;
+        pages::write_file_safely(&dest, &bytes)?;
+        self.path = dest;
+        self.file_size = bytes.len() as u64;
+        self.saved_state = self.state;
+        self.info(id)
+    }
 }
 
 fn convert_outline(items: &[Outline]) -> Vec<OutlineItem> {

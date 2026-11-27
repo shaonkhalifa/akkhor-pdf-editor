@@ -18,6 +18,10 @@ export interface Tab {
   hits: SearchHit[];
   hitIndex: number;
   sidebar: "pages" | "bookmarks" | null;
+  /** Pages selected in the thumbnails (zero-based, sorted). */
+  selected: number[];
+  /** Where a Shift+click range selection starts. */
+  selectAnchor: number;
 }
 
 export type Screen = "home" | "doc" | "selftest";
@@ -27,12 +31,20 @@ interface State {
   tabs: Tab[];
   activeId: number | null;
   screen: Screen;
+  /** A short message shown at the bottom of the window. */
+  toast: string | null;
+  /** Files listed in the merge dialog; null when it is closed. */
+  merge: string[] | null;
+  notify: (text: string) => void;
+  setMerge: (files: string[] | null) => void;
   setLang: (l: Lang) => void;
   setScreen: (s: Screen) => void;
   addTab: (doc: DocInfo) => void;
   closeTab: (id: number) => void;
   activate: (id: number) => void;
   update: (id: number, patch: Partial<Tab>) => void;
+  /** Replace a tab's document after a change, undo or save. */
+  setDoc: (doc: DocInfo, selected?: number[]) => void;
 }
 
 function initialLang(): Lang {
@@ -43,11 +55,21 @@ function initialLang(): Lang {
   }
 }
 
+let toastTimer = 0;
+
 export const useApp = create<State>((set) => ({
   lang: initialLang(),
   tabs: [],
   activeId: null,
   screen: "home",
+  toast: null,
+  merge: null,
+  notify: (text) => {
+    set({ toast: text });
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => set({ toast: null }), 2500);
+  },
+  setMerge: (merge) => set({ merge }),
   setLang: (lang) => {
     try {
       localStorage.setItem("akkhor.lang", lang);
@@ -71,6 +93,8 @@ export const useApp = create<State>((set) => ({
           hits: [],
           hitIndex: 0,
           sidebar: doc.page_count > 1 ? "pages" : null,
+          selected: [],
+          selectAnchor: 0,
         },
       ],
       activeId: doc.id,
@@ -87,6 +111,22 @@ export const useApp = create<State>((set) => ({
   activate: (id) => set({ activeId: id, screen: "doc" }),
   update: (id, patch) =>
     set((s) => ({ tabs: s.tabs.map((t) => (t.doc.id === id ? { ...t, ...patch } : t)) })),
+  setDoc: (doc, selected) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => {
+        if (t.doc.id !== doc.id) return t;
+        const last = Math.max(0, doc.page_count - 1);
+        const changed = doc.version !== t.doc.version;
+        return {
+          ...t,
+          doc,
+          page: Math.min(t.page, last),
+          selected: (selected ?? t.selected).filter((p) => p <= last),
+          // Search results point at old page positions after a change.
+          ...(changed ? { hits: [], hitIndex: 0, query: "" } : {}),
+        };
+      }),
+    })),
 }));
 
 export const useActiveTab = () => useApp((s) => s.tabs.find((t) => t.doc.id === s.activeId) ?? null);

@@ -12,10 +12,50 @@ pub struct LineInfo {
     pub text: String,
     /// Box around the glyphs actually drawn on this line.
     pub bbox: Rect,
-    /// Baseline origin of the leftmost glyph.
+    /// Baseline origin of the first glyph along the line.
     pub origin: Point,
     /// Font size of the line's glyphs, in points.
     pub size: f32,
+    /// Writing direction, clockwise from left-to-right: 0, 90, 180 or 270
+    /// degrees. Text on a page rotated by 90 degrees runs top to bottom.
+    pub angle: i32,
+}
+
+impl LineInfo {
+    /// Unit vector of the writing direction.
+    fn dir(&self) -> (f32, f32) {
+        dir_of(self.angle)
+    }
+    /// Distance along the line (x for upright text).
+    fn along(&self, p: Point) -> f32 {
+        let (dx, dy) = self.dir();
+        p.x * dx + p.y * dy
+    }
+    /// Distance across the line, growing in reading order of rows (y for upright text).
+    fn across(&self, p: Point) -> f32 {
+        let (dx, dy) = self.dir();
+        -p.x * dy + p.y * dx
+    }
+}
+
+fn dir_of(angle: i32) -> (f32, f32) {
+    match angle.rem_euclid(360) {
+        90 => (0.0, 1.0),
+        180 => (-1.0, 0.0),
+        270 => (0.0, -1.0),
+        _ => (1.0, 0.0),
+    }
+}
+
+/// The nearest of the four directions to the vector `(dx, dy)`.
+fn snap_angle(dx: f32, dy: f32) -> i32 {
+    if dx.abs() >= dy.abs() {
+        if dx >= 0.0 { 0 } else { 180 }
+    } else if dy >= 0.0 {
+        90
+    } else {
+        270
+    }
 }
 
 pub fn open_pdf(bytes: &[u8]) -> Result<Document> {
@@ -34,9 +74,19 @@ fn rows_of(tp: &TextPage) -> Vec<LineInfo> {
             let mut text = String::new();
             let mut origin: Option<Point> = None;
             let mut size = 0.0f32;
+            // A glyph's quad runs along the writing direction.
+            let angle = line
+                .chars()
+                .next()
+                .map(|c| {
+                    let q = c.quad();
+                    snap_angle(q.ur.x - q.ul.x, q.ur.y - q.ul.y)
+                })
+                .unwrap_or(0);
+            let (dx, dy) = dir_of(angle);
             for ch in line.chars() {
                 let o = ch.origin();
-                if origin.is_none_or(|cur| o.x < cur.x) {
+                if origin.is_none_or(|cur| o.x * dx + o.y * dy < cur.x * dx + cur.y * dy) {
                     origin = Some(o);
                 }
                 size = size.max(ch.size());
@@ -45,7 +95,7 @@ fn rows_of(tp: &TextPage) -> Vec<LineInfo> {
                 }
             }
             if let Some(origin) = origin {
-                out.push(LineInfo { text, bbox: line.bounds(), origin, size });
+                out.push(LineInfo { text, bbox: line.bounds(), origin, size, angle });
             }
         }
     }
@@ -64,7 +114,7 @@ fn merge_rows(lines: Vec<LineInfo>) -> Vec<LineInfo> {
             if same_row(row, &line) {
                 row.text.push_str(&line.text);
                 row.bbox = row.bbox.union(&line.bbox);
-                if line.origin.x < row.origin.x {
+                if row.along(line.origin) < row.along(row.origin) {
                     row.origin = line.origin;
                 }
                 row.size = row.size.max(line.size);
@@ -78,7 +128,7 @@ fn merge_rows(lines: Vec<LineInfo>) -> Vec<LineInfo> {
 
 fn same_row(a: &LineInfo, b: &LineInfo) -> bool {
     let tolerance = 0.5 * a.size.max(b.size).max(1.0);
-    (a.origin.y - b.origin.y).abs() <= tolerance
+    a.angle == b.angle && (a.across(a.origin) - a.across(b.origin)).abs() <= tolerance
 }
 
 /// Combine the text pass and the geometry pass, then sort top to bottom.
@@ -101,11 +151,14 @@ fn combine(text_rows: Vec<LineInfo>, geometry: Vec<LineInfo>) -> Vec<LineInfo> {
         .collect();
     // Top to bottom, then left to right. Content added later (for example an
     // edited line) is drawn last but read in its place.
+    // Pages turned by 90 degrees read the same way in their own direction.
     rows.sort_by(|a, b| {
-        if same_row(a, b) {
-            a.origin.x.total_cmp(&b.origin.x)
+        if a.angle != b.angle {
+            a.angle.cmp(&b.angle)
+        } else if same_row(a, b) {
+            a.along(a.origin).total_cmp(&a.along(b.origin))
         } else {
-            a.origin.y.total_cmp(&b.origin.y)
+            a.across(a.origin).total_cmp(&a.across(b.origin))
         }
     });
     rows

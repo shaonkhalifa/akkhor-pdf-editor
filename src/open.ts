@@ -10,7 +10,12 @@ export function registerPasswordPrompt(fn: typeof promptPassword) {
   promptPassword = fn;
 }
 
-function baseName(path: string) {
+/** Ask for a PDF's password; null if the user cancels. */
+export function askPassword(name: string, wrong: boolean): Promise<string | null> {
+  return promptPassword ? promptPassword(name, wrong) : Promise.resolve(null);
+}
+
+export function baseName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
 }
 

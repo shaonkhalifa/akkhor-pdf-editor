@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { closePdf } from "./api";
+import ChoiceDialog from "./components/ChoiceDialog";
 import DocView from "./components/DocView";
 import Home from "./components/Home";
+import MergeDialog from "./components/MergeDialog";
 import PasswordDialog from "./components/PasswordDialog";
 import SelfTest from "./components/SelfTest";
 import { t } from "./i18n";
 import { openPath, pickAndOpen } from "./open";
+import { confirmClose } from "./pageTools";
 import { useActiveTab, useApp } from "./store";
 import "./App.css";
 
 export default function App() {
-  const { lang, setLang, tabs, activeId, screen, activate, closeTab, setScreen } = useApp();
+  const { lang, setLang, tabs, activeId, screen, activate, closeTab, setScreen, toast, merge } = useApp();
   const active = useActiveTab();
   const [dragging, setDragging] = useState(false);
 
@@ -35,15 +39,27 @@ export default function App() {
     };
   }, []);
 
-  const close = (id: number) => {
+  const close = async (id: number) => {
+    if (!(await confirmClose([id]))) return;
     closePdf(id).catch(() => {});
     closeTab(id);
   };
 
+  // Closing the window: offer to save unsaved changes first (SRS 4.5).
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onCloseRequested(async (event) => {
+      const ids = useApp.getState().tabs.map((tab) => tab.doc.id);
+      if (!(await confirmClose(ids))) event.preventDefault();
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
   // App-wide shortcuts (SRS 4.4).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.ctrlKey) return;
+      if (!e.ctrlKey || document.querySelector(".overlay")) return;
       const k = e.key.toLowerCase();
       if (k === "o") {
         e.preventDefault();
@@ -82,6 +98,11 @@ export default function App() {
               title={tab.doc.path}
             >
               <button className="tab-name" onClick={() => activate(tab.doc.id)}>
+                {tab.doc.dirty && (
+                  <span className="dirty-dot" title={t(lang, "unsavedTitle")} aria-label={t(lang, "unsavedTitle")}>
+                    ●{" "}
+                  </span>
+                )}
                 {tab.doc.name}
               </button>
               <button className="tab-close" aria-label={`${t(lang, "close")} ${tab.doc.name}`} onClick={() => close(tab.doc.id)}>
@@ -113,7 +134,14 @@ export default function App() {
         {dragging && screen === "doc" && <div className="drop-overlay">{t(lang, "dropNow")}</div>}
       </main>
 
+      {merge && <MergeDialog initial={merge} />}
+      <ChoiceDialog />
       <PasswordDialog />
+      {toast && (
+        <div className="toast" role="status">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

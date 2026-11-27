@@ -14,7 +14,8 @@ use tauri::{ipc::Response, path::BaseDirectory, AppHandle, Manager, State};
 
 use engine::fonts::{default_bangla, dev_fonts_dir};
 use engine::selftest::{check_all_fonts, run_edit_spike, FontCheck, SpikeResult};
-use engine::viewer::{DocInfo, PageLink, SearchHit, TextLine, Viewer};
+use engine::pages::{self, MergeInput};
+use engine::viewer::{DocInfo, PageEdit, PageLink, SearchHit, TextLine, Viewer};
 
 /// PDFs produced by the last self-test, kept in memory (never written to disk).
 #[derive(Default)]
@@ -105,10 +106,9 @@ const LARGE_FILE_BYTES: u64 = 500 * 1024 * 1024;
 /// How many recent files to remember (FR-1.4).
 const RECENT_MAX: usize = 10;
 
-/// Open documents: the engine plus the file path behind each document id.
+/// Open documents, all owned by the engine thread.
 struct Docs {
     viewer: Viewer,
-    paths: Mutex<HashMap<u64, PathBuf>>,
 }
 
 /// Run blocking PDF work off the UI thread and turn errors into text.
@@ -163,23 +163,24 @@ async fn open_pdf(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
-    docs.paths.lock().map_err(|e| e.to_string())?.insert(info.id, path.clone());
 
-    let mut recent = read_recent(&app);
+    remember(&app, &path);
+    Ok(info)
+}
+
+/// Put a file at the top of the recent files list.
+fn remember(app: &AppHandle, path: &std::path::Path) {
+    let mut recent = read_recent(app);
     let shown = path.to_string_lossy().into_owned();
     recent.retain(|p| p != &shown);
     recent.insert(0, shown);
     recent.truncate(RECENT_MAX);
-    let _ = write_recent(&app, &recent);
-    Ok(info)
+    let _ = write_recent(app, &recent);
 }
 
 #[tauri::command]
 fn close_pdf(docs: State<'_, Docs>, id: u64) {
     docs.viewer.close(id);
-    if let Ok(mut paths) = docs.paths.lock() {
-        paths.remove(&id);
-    }
 }
 
 /// Draw a page as raw RGBA (8-byte width/height header, then pixels).
@@ -221,28 +222,108 @@ async fn search_pdf(
     blocking(move || viewer.search(id, page_count, &needle)).await
 }
 
-/// Save a copy of an open document. Writes to a temporary file first, then
-/// renames it, so a failed save never leaves a half-written file (SRS 4.5).
+// ---------------------------------------------------------------------------
+// Page tools (SRS Module 3)
+// ---------------------------------------------------------------------------
+
+/// Rotate, delete, move or insert pages. Returns the updated document.
 #[tauri::command]
-async fn save_copy(docs: State<'_, Docs>, id: u64, dest: String) -> Result<(), String> {
-    let source = docs
-        .paths
-        .lock()
-        .map_err(|e| e.to_string())?
-        .get(&id)
-        .cloned()
-        .ok_or("document is not open")?;
+async fn edit_pages(docs: State<'_, Docs>, id: u64, edit: PageEdit) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.edit(id, edit)).await
+}
+
+#[tauri::command]
+async fn undo(docs: State<'_, Docs>, id: u64) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.undo(id)).await
+}
+
+#[tauri::command]
+async fn redo(docs: State<'_, Docs>, id: u64) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.redo(id)).await
+}
+
+/// Save the document to its own file, or to `dest` (Save As). The file is
+/// written to a temporary file first and then renamed over the target, so a
+/// failed save never leaves a half-written file (SRS 4.5).
+#[tauri::command]
+async fn save_pdf(app: AppHandle, docs: State<'_, Docs>, id: u64, dest: Option<String>) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    let info = blocking(move || viewer.save(id, dest.map(PathBuf::from))).await?;
+    remember(&app, std::path::Path::new(&info.path));
+    Ok(info)
+}
+
+/// Copy the chosen pages into a new PDF file.
+#[tauri::command]
+async fn extract_pages(docs: State<'_, Docs>, id: u64, pages: Vec<i32>, dest: String) -> Result<(), String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.extract_to(id, &pages, std::path::Path::new(&dest))).await
+}
+
+/// How to split a document.
+#[derive(serde::Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+enum SplitPlan {
+    /// A new file every `n` pages.
+    Every { n: i32 },
+    /// Page ranges typed by the user, such as "1-3, 4-10".
+    Ranges { text: String },
+}
+
+/// Split into several files in `dir`. Returns the paths written.
+#[tauri::command]
+async fn split_pdf(
+    docs: State<'_, Docs>,
+    id: u64,
+    page_count: i32,
+    plan: SplitPlan,
+    dir: String,
+    stem: String,
+) -> Result<Vec<String>, String> {
+    let viewer = docs.viewer.clone();
     blocking(move || {
-        let dest = PathBuf::from(dest);
-        if std::path::absolute(&dest)? == std::path::absolute(&source)? {
-            return Ok(()); // Saving over itself: nothing changed yet.
-        }
-        let tmp = dest.with_extension("akkhor-tmp");
-        std::fs::copy(&source, &tmp)?;
-        std::fs::rename(&tmp, &dest)?;
-        Ok(())
+        let groups = match plan {
+            SplitPlan::Every { n } => pages::every_n(page_count, n),
+            SplitPlan::Ranges { text } => pages::parse_ranges(&text, page_count)?,
+        };
+        let written = viewer.split_to(id, &groups, std::path::Path::new(&dir), &stem)?;
+        Ok(written.into_iter().map(|p| p.to_string_lossy().into_owned()).collect())
     })
     .await
+}
+
+#[derive(serde::Deserialize)]
+struct MergeFile {
+    path: String,
+    password: Option<String>,
+}
+
+/// Join several PDFs into a new file at `dest`.
+#[tauri::command]
+async fn merge_pdfs(files: Vec<MergeFile>, dest: String) -> Result<(), String> {
+    blocking(move || {
+        let inputs: Vec<MergeInput> = files
+            .into_iter()
+            .map(|f| MergeInput { path: PathBuf::from(f.path), password: f.password })
+            .collect();
+        let dest = PathBuf::from(dest);
+        if inputs.iter().any(|i| std::path::absolute(&i.path).ok() == std::path::absolute(&dest).ok()) {
+            anyhow::bail!("SAVE_OVER_INPUT");
+        }
+        let bytes = pages::merge(&inputs)?;
+        pages::write_file_safely(&dest, &bytes)
+    })
+    .await
+}
+
+/// Check that a file is a PDF that opens, and whether it needs a password.
+/// Used before merging or inserting. Returns the page count.
+#[tauri::command]
+async fn probe_pdf(path: String, password: Option<String>) -> Result<i32, String> {
+    blocking(move || Ok(pages::load(std::path::Path::new(&path), password.as_deref())?.page_count()?)).await
 }
 
 #[tauri::command]
@@ -260,7 +341,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Results::default())
-        .manage(Docs { viewer: Viewer::new(), paths: Mutex::new(HashMap::new()) })
+        .manage(Docs { viewer: Viewer::new() })
         .invoke_handler(tauri::generate_handler![
             app_info,
             run_self_test,
@@ -272,7 +353,14 @@ pub fn run() {
             page_text,
             page_links,
             search_pdf,
-            save_copy,
+            edit_pages,
+            undo,
+            redo,
+            save_pdf,
+            extract_pages,
+            split_pdf,
+            merge_pdfs,
+            probe_pdf,
             recent_files,
             clear_recent_files,
         ])

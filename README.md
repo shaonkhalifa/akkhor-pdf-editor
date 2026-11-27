@@ -6,11 +6,26 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Everything happens on your own PC. The app contains **no network code**, so your files never leave your computer.
 - Free forever, licensed under **AGPL-3.0-or-later**.
 
-> **Status: Phase 2 of 8 — a working PDF viewer.** Open, read, zoom, search
-> (Bangla and English), copy text, print and save copies of PDFs. Editing
-> comes in later phases. See the [roadmap](#roadmap).
+> **Status: Phase 3 of 8 — viewer plus page tools.** Open, read, search and
+> print PDFs, and rotate, delete, reorder, insert, extract, split and merge
+> pages, with undo. Text editing comes in Phase 5. See the [roadmap](#roadmap).
 
-## What you can do (v0.2)
+## What you can do (v0.3)
+
+### Page tools (new in v0.3)
+
+- Select pages in the thumbnails (Ctrl/Shift+click for several, Ctrl+A for all)
+- Drag thumbnails to put pages in a new order
+- Rotate left or right (Ctrl+[ / Ctrl+]), delete (Delete key), insert a blank page, or insert pages from another PDF; right-click a thumbnail for the same menu
+- Extract the selected pages to a new PDF
+- Split a PDF every N pages, one file per page, or by ranges such as `1-3, 4-10, 11-` (Bangla digits work too)
+- Merge several PDFs in the order you choose
+- Undo and redo every page change (Ctrl+Z / Ctrl+Y), up to 50 steps
+- Save (Ctrl+S) or Save As (Ctrl+Shift+S). Saving writes a temporary file first and then replaces the original, so a crash or a full disk never leaves a half-written PDF. The app asks before closing a file with unsaved changes.
+- Password-protected PDFs stay protected after editing
+- Bookmarks follow their pages when pages move; bookmarks of deleted pages are removed
+
+### Viewer
 
 - Open PDFs with the Open button, Ctrl+O, drag and drop, or the recent files list
 - Open several PDFs in tabs; open password-protected PDFs
@@ -18,7 +33,7 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Page thumbnails and the PDF's bookmarks in the sidebar; internal links work
 - Search Bangla and English text with highlights (Ctrl+F, Enter / Shift+Enter, F3)
 - Select and copy text as correct Unicode
-- Print (Ctrl+P) with the Windows print dialog; Save As (Ctrl+S)
+- Print (Ctrl+P) with the Windows print dialog
 - Interface in Bangla or English
 
 ## What Phase 1 proves
@@ -95,7 +110,9 @@ src-tauri/src/engine/    PDF engine (Rust)
   script.rs              Bangla / English script detection (FR-6.10)
   fonts.rs               bundled fonts and glyph coverage
   layout.rs              text → HarfBuzz-shaped PDF via MuPDF
-  extract.rs             read text and positions back
+  extract.rs             read text and positions back (any page rotation)
+  viewer.rs              open documents, drawing, search, undo history
+  pages.rs               page tools: rotate, delete, reorder, insert, split, merge
   edit.rs                replace text in an existing PDF (spike)
   render.rs              page → PNG
   selftest.rs            SRS 6.4 shaping check + edit spike
@@ -107,8 +124,8 @@ scripts/                 helper scripts (no-network check)
 ## Roadmap
 
 1. Setup, shaping test and text-edit spike ✅
-2. **PDF viewer and printing** ✅ ← you are here
-3. Page tools (merge, split, rotate, delete, reorder)
+2. PDF viewer and printing ✅
+3. **Page tools (merge, split, rotate, delete, reorder)** ✅ ← you are here
 4. Images and signatures
 5. Text editing, Bangla and English (core feature)
 6. Create, convert and forms
