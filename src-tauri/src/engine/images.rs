@@ -269,6 +269,18 @@ fn swap_xobject(doc: &mut PdfDocument, page_no: i32, xref: i32, replacement: Pdf
     Ok(())
 }
 
+/// Point every page's use of image `xref` at `replacement` (pages that do not
+/// use it are skipped). Returns how many pages changed.
+pub fn replace_everywhere(doc: &mut PdfDocument, xref: i32, replacement: &PdfObject) -> Result<usize> {
+    let mut changed = 0;
+    for page_no in 0..doc.page_count()? {
+        if swap_xobject(doc, page_no, xref, replacement.clone()).is_ok() {
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
 /// Remove an image from a page. Its name is pointed at an empty drawing, so
 /// every PDF reader shows nothing there; the image data itself is dropped
 /// when the file is saved.

@@ -13,6 +13,8 @@
 //! The same code adds new text boxes (FR-6.3). Highlight, underline,
 //! strikethrough (FR-6.7) and permanent redaction (FR-6.8) are here too.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, bail, Context, Result};
 use mupdf::pdf::{
     PdfDocument, PdfObject, PdfRedactImageMethod, PdfRedactLineArtMethod, PdfRedactOptions, PdfRedactTextMethod,
@@ -316,6 +318,124 @@ fn remove_text(doc: &mut PdfDocument, page_no: i32, boxes: &[[f32; 4]]) -> Resul
     Ok(())
 }
 
+/// Text laid out and ready to stamp onto pages (possibly many times).
+pub struct Laid {
+    /// The one-page PDF holding the text.
+    pub(crate) pdf: Vec<u8>,
+    /// First line: baseline y and glyph top, in the layout page (y down).
+    pub(crate) first_baseline: f32,
+    pub(crate) first_top: f32,
+    /// Bottom of the last line's glyphs (y down).
+    pub(crate) last_bottom: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub lines: usize,
+}
+
+/// Lay out already-broken `lines` in `style`, `width` points wide.
+pub fn lay_out(lines: &[String], style: &Style, width: f32) -> Result<Laid> {
+    let height = lines.len() as f32 * style.line_height + style.size * 2.0;
+    let pdf = styled_pdf(lines, style, width, height, true)?;
+    let rep = PdfDocument::from_bytes(&pdf)?;
+    if rep.page_count()? != 1 {
+        bail!("the new text did not fit on one layout page");
+    }
+    let rows = page_lines(&rep, 0)?;
+    let first = rows.first().context("the new text produced no line")?;
+    let last_bottom = rows.iter().map(|r| r.bbox.y1).fold(first.bbox.y1, f32::max);
+    let b = rep.load_pdf_page(0)?.bounds()?;
+    Ok(Laid {
+        first_baseline: first.origin.y,
+        first_top: first.bbox.y0.min(first.origin.y - style.size * 0.8),
+        last_bottom,
+        width: b.x1 - b.x0,
+        height: b.y1 - b.y0,
+        lines: lines.len(),
+        pdf,
+    })
+}
+
+/// Where stamped text goes on a page (page points, y down).
+#[derive(Debug, Clone, Copy)]
+pub enum Anchor {
+    /// Box left edge and the first line's baseline.
+    Baseline { left: f32, y: f32 },
+    /// Box left edge and the top of the first line's letters.
+    Top { left: f32, y: f32 },
+    /// Box left edge and the bottom of the last line's letters.
+    Bottom { left: f32, y: f32 },
+    /// The middle of the text at a point, turned clockwise by `rotation`.
+    Center { x: f32, y: f32, rotation: f32 },
+}
+
+/// Copy laid-out text into `doc` as a Form XObject (y up, `laid.width` x
+/// `laid.height`).
+pub(crate) fn laid_xobject(doc: &mut PdfDocument, laid: &Laid) -> Result<PdfObject> {
+    let rep = PdfDocument::from_bytes(&laid.pdf)?;
+    let rep_page = rep.load_pdf_page(0)?;
+    let rep_res = rep.find_page(0)?.get_dict_inheritable("Resources")?.context("new text has no resources")?;
+    let content = read_contents(rep_page.contents()?)?;
+    let mut graft = doc.new_graft_map()?;
+    let res = graft.graft_object(&rep_res)?;
+    let mut bbox = doc.new_array()?;
+    for v in [0.0, 0.0, laid.width, laid.height] {
+        bbox.array_push(PdfObject::new_real(v)?)?;
+    }
+    let mut form = doc.new_dict()?;
+    form.dict_put("Type", PdfObject::new_name("XObject")?)?;
+    form.dict_put("Subtype", PdfObject::new_name("Form")?)?;
+    form.dict_put("BBox", bbox)?;
+    form.dict_put("Resources", res)?;
+    Ok(doc.add_stream(&Buffer::from_bytes(&content)?, Some(&form), false)?)
+}
+
+/// Put laid-out text on a page as a Form XObject, optionally see-through.
+pub fn stamp(doc: &mut PdfDocument, page_no: i32, laid: &Laid, anchor: Anchor, opacity: f32) -> Result<()> {
+    let xobj = laid_xobject(doc, laid)?;
+    let mut page = doc.load_pdf_page(page_no)?;
+    let mut resources = page.resources()?;
+    let mut xobjects = match resources.get_dict("XObject")? {
+        Some(d) => d,
+        None => {
+            resources.dict_put("XObject", doc.new_dict()?)?;
+            resources.get_dict("XObject")?.context("creating XObject dictionary")?
+        }
+    };
+    let name = (1..)
+        .map(|i| format!("AkkhorText{i}"))
+        .find(|n| matches!(xobjects.get_dict(n.as_str()), Ok(None)))
+        .expect("an unused name");
+    xobjects.dict_put(name.as_str(), xobj)?;
+
+    // Form space has y up; (x, y) is (x, height - y) on the layout page.
+    let mut m = Matrix::new(1.0, 0.0, 0.0, -1.0, 0.0, laid.height);
+    let (dx, dy, turn) = match anchor {
+        Anchor::Baseline { left, y } => (left, y - laid.first_baseline, None),
+        Anchor::Top { left, y } => (left, y - laid.first_top, None),
+        Anchor::Bottom { left, y } => (left, y - laid.last_bottom, None),
+        Anchor::Center { x, y, rotation } => {
+            // Turn around the middle of the text, then move it to (x, y).
+            let mid_y = (laid.first_top + laid.last_bottom) / 2.0;
+            m.concat(Matrix::new_translate(-laid.width / 2.0, -mid_y));
+            (x, y, Some(rotation))
+        }
+    };
+    if let Some(r) = turn {
+        m.concat(Matrix::new_rotate(r));
+    }
+    m.concat(Matrix::new_translate(dx, dy));
+    m.concat(page.ctm()?.invert().context("the page has no size")?);
+    let gs = if opacity < 0.999 { page.register_ext_gstate(doc, None, Some(opacity.clamp(0.02, 1.0)))? } else { None };
+    let gs = gs.map(|g| format!("{g} gs ")).unwrap_or_default();
+    page.wrap_contents(doc)?;
+    page.insert_contents(
+        doc,
+        format!("q {gs}{:.4} {:.4} {:.4} {:.4} {:.3} {:.3} cm /{name} Do Q\n", m.a, m.b, m.c, m.d, m.e, m.f).as_bytes(),
+        true,
+    )?;
+    Ok(())
+}
+
 /// Lay out `text` in `style` and put it on the page. Returns the number of
 /// lines used.
 pub fn place_text(doc: &mut PdfDocument, page_no: i32, text: &str, style: &Style, at: &TextPlacement) -> Result<usize> {
@@ -347,68 +467,109 @@ pub fn place_text(doc: &mut PdfDocument, page_no: i32, text: &str, style: &Style
     if text.trim().is_empty() {
         return Ok(0); // Editing a block down to nothing just removes it.
     }
-
-    let height = lines.len() as f32 * style.line_height + style.size * 2.0;
-    let rep_bytes = styled_pdf(&lines, &style, at.width, height, true)?;
-    let rep = PdfDocument::from_bytes(&rep_bytes)?;
-    if rep.page_count()? != 1 {
-        bail!("the new text did not fit on one layout page");
-    }
-    let first = page_lines(&rep, 0)?.into_iter().next().context("the new text produced no line")?;
-    let rep_page = rep.load_pdf_page(0)?;
-    let rep_box = rep_page.bounds()?;
-    let (rep_w, rep_h) = (rep_box.x1 - rep_box.x0, rep_box.y1 - rep_box.y0);
-
-    // Copy the laid-out page in as a Form XObject.
-    let rep_res = rep.find_page(0)?.get_dict_inheritable("Resources")?.context("new text has no resources")?;
-    let content = read_contents(rep_page.contents()?)?;
-    let mut graft = doc.new_graft_map()?;
-    let res = graft.graft_object(&rep_res)?;
-    let mut bbox = doc.new_array()?;
-    for v in [0.0, 0.0, rep_w, rep_h] {
-        bbox.array_push(PdfObject::new_real(v)?)?;
-    }
-    let mut form = doc.new_dict()?;
-    form.dict_put("Type", PdfObject::new_name("XObject")?)?;
-    form.dict_put("Subtype", PdfObject::new_name("Form")?)?;
-    form.dict_put("BBox", bbox)?;
-    form.dict_put("Resources", res)?;
-    let xobj = doc.add_stream(&Buffer::from_bytes(&content)?, Some(&form), false)?;
-
-    let mut page = doc.load_pdf_page(page_no)?;
-    let mut resources = page.resources()?;
-    let mut xobjects = match resources.get_dict("XObject")? {
-        Some(d) => d,
-        None => {
-            resources.dict_put("XObject", doc.new_dict()?)?;
-            resources.get_dict("XObject")?.context("creating XObject dictionary")?
-        }
-    };
-    let name = (1..)
-        .map(|i| format!("AkkhorText{i}"))
-        .find(|n| matches!(xobjects.get_dict(n.as_str()), Ok(None)))
-        .expect("an unused name");
-    xobjects.dict_put(name.as_str(), xobj)?;
-
-    // Where the laid-out page's top-left goes on the page (y down).
-    let x0 = at.left;
-    let y0 = match (at.baseline, at.top) {
-        (Some(base), _) => base - first.origin.y,
-        // A new box: the tallest letters of the first line start at `top`.
-        (None, Some(top)) => top - first.bbox.y0.min(first.origin.y - style.size * 0.8),
+    let laid = lay_out(&lines, &style, at.width)?;
+    let anchor = match (at.baseline, at.top) {
+        (Some(y), _) => Anchor::Baseline { left: at.left, y },
+        (None, Some(y)) => Anchor::Top { left: at.left, y },
         (None, None) => bail!("the text needs a position"),
     };
-    // Form space has y up: (x, y) lands at (x0 + x, y0 + rep_h - y), then
-    // into the page's own coordinates (handles rotated pages too).
-    let mut m = Matrix::new(1.0, 0.0, 0.0, -1.0, x0, y0 + rep_h);
-    m.concat(page.ctm()?.invert().context("the page has no size")?);
-    page.wrap_contents(doc)?;
-    page.insert_contents(
-        doc,
-        format!("q {:.4} {:.4} {:.4} {:.4} {:.3} {:.3} cm /{name} Do Q\n", m.a, m.b, m.c, m.d, m.e, m.f).as_bytes(),
-        true,
-    )?;
+    stamp(doc, page_no, &laid, anchor, 1.0)?;
     Ok(lines.len())
+}
+
+// ---------------------------------------------------------------------------
+// Page numbers, header, footer and watermark (FR-7.6)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Spot {
+    /// Top of the page (header).
+    Top,
+    /// Bottom of the page (footer, page numbers).
+    Bottom,
+    /// Across the middle (watermark).
+    Middle,
+}
+
+/// Text added to many pages. In `text`, `{n}` is the page number and
+/// `{total}` the number of pages.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Decoration {
+    pub text: String,
+    pub spot: Spot,
+    /// Distance from the page edge, in points (top and bottom spots).
+    #[serde(default = "default_margin")]
+    pub margin: f32,
+    /// Turn (watermark), degrees clockwise.
+    #[serde(default)]
+    pub rotation: f32,
+    #[serde(default = "full")]
+    pub opacity: f32,
+    /// Write numbers with Bangla digits (১২৩).
+    #[serde(default)]
+    pub bangla_digits: bool,
+    /// Pages to decorate (zero-based); empty means every page.
+    #[serde(default)]
+    pub pages: Vec<i32>,
+    /// Count page numbers from this number on the first decorated page.
+    #[serde(default = "one")]
+    pub first_number: i32,
+}
+
+fn default_margin() -> f32 {
+    28.0
+}
+fn full() -> f32 {
+    1.0
+}
+fn one() -> i32 {
+    1
+}
+
+fn digits(n: i32, bangla: bool) -> String {
+    let s = n.to_string();
+    if bangla {
+        s.chars().map(|c| c.to_digit(10).map(|d| char::from_u32(0x09E6 + d).unwrap()).unwrap_or(c)).collect()
+    } else {
+        s
+    }
+}
+
+/// Add page numbers, a header, a footer or a watermark to pages.
+pub fn decorate(doc: &mut PdfDocument, item: &Decoration, style: &Style) -> Result<usize> {
+    let count = doc.page_count()?;
+    let pages: Vec<i32> = if item.pages.is_empty() { (0..count).collect() } else { item.pages.iter().copied().filter(|p| (0..count).contains(p)).collect() };
+    if pages.is_empty() {
+        bail!("no pages to add text to");
+    }
+    if item.text.trim().is_empty() {
+        bail!("EMPTY_TEXT");
+    }
+    let total = digits(pages.len() as i32 + item.first_number - 1, item.bangla_digits);
+    let mut cache: HashMap<(String, i32), Laid> = HashMap::new();
+    for (i, &page_no) in pages.iter().enumerate() {
+        let text = item.text.replace("{n}", &digits(item.first_number + i as i32, item.bangla_digits)).replace("{total}", &total);
+        let b = doc.load_pdf_page(page_no)?.bounds()?;
+        let (pw, ph) = (b.x1 - b.x0, b.y1 - b.y0);
+        let width = match item.spot {
+            Spot::Middle => (pw.hypot(ph) * 0.9).max(50.0),
+            _ => (pw - 2.0 * item.margin).max(50.0),
+        };
+        let key = (text.clone(), width.round() as i32);
+        if !cache.contains_key(&key) {
+            let lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+            cache.insert(key.clone(), lay_out(&lines, style, width)?);
+        }
+        let laid = &cache[&key];
+        let anchor = match item.spot {
+            Spot::Top => Anchor::Top { left: item.margin, y: item.margin },
+            Spot::Bottom => Anchor::Bottom { left: item.margin, y: ph - item.margin },
+            Spot::Middle => Anchor::Center { x: pw / 2.0, y: ph / 2.0, rotation: item.rotation },
+        };
+        stamp(doc, page_no, laid, anchor, item.opacity)?;
+    }
+    Ok(pages.len())
 }
 
 /// Read a page's /Contents (one stream or an array of streams) as bytes.

@@ -25,6 +25,7 @@ export default function TextEditor({ docId, editing, scale, pageSize }: {
   const [busy, setBusy] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const resize = useRef<{ x: number; width: number } | null>(null);
+  const move = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const [boxH, setBoxH] = useState(0);
   const [barH, setBarH] = useState(84);
@@ -69,7 +70,7 @@ export default function TextEditor({ docId, editing, scale, pageSize }: {
     }
   };
 
-  const top = block ? block.rect[1] - (lh - style.size) / 2 : editing.top;
+  const top = editing.top;
   // The style bar sits above the box, or below it when there is no room
   // above (near the top of the page), so it never covers the text.
   const pageW = pageSize[0] * scale;
@@ -116,6 +117,29 @@ export default function TextEditor({ docId, editing, scale, pageSize }: {
             }
           }}
         />
+        <span
+          className="move-handle"
+          title={t(lang, "moveBox")}
+          aria-label={t(lang, "moveBox")}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            move.current = { x: e.clientX, y: e.clientY, left: editing.left, top: editing.top };
+          }}
+          onPointerMove={(e) => {
+            const m = move.current;
+            if (!m) return;
+            const left = Math.max(0, Math.min(pageSize[0] - 10, m.left + (e.clientX - m.x) / scale));
+            const top = Math.max(0, Math.min(pageSize[1] - 10, m.top + (e.clientY - m.y) / scale));
+            updateEditing(docId, { left, top });
+          }}
+          onPointerUp={() => {
+            move.current = null;
+            areaRef.current?.focus({ preventScroll: true });
+          }}
+        >
+          ✥
+        </span>
         <span
           className="width-handle"
           title={t(lang, "boxWidth")}

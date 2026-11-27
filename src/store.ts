@@ -46,9 +46,12 @@ export interface Editing {
   page: number;
   /** The block being changed; null for a new text box. */
   block: TextBlock | null;
+  /** Top-left of the edit box, in points. Dragging the box moves it. */
   left: number;
-  /** Top of a new box, in points. */
   top: number;
+  /** Where the box started, to tell how far it was moved. */
+  startLeft: number;
+  startTop: number;
   width: number;
   text: string;
   style: StyleChoice;

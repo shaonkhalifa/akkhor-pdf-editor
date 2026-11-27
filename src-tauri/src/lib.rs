@@ -487,20 +487,25 @@ async fn place_text(
     let viewer = docs.viewer.clone();
     let dir = fonts_dir(&app);
     blocking(move || {
-        let size = style.size.clamp(2.0, 400.0);
-        let style = Style {
-            bangla: engine::fonts::bangla_faces(&style.bangla_font, &dir),
-            english: engine::fonts::english_face(&style.english_font),
-            size,
-            line_height: style.line_height.filter(|lh| *lh > 0.0).unwrap_or(size * 1.25),
-            bold: style.bold,
-            italic: style.italic,
-            color: style.color,
-            align: style.align,
-        };
+        let style = resolve_style(&style, &dir);
         viewer.edit(id, PageEdit::PlaceText { page, text, style, placement })
     })
     .await
+}
+
+/// Turn the fonts chosen by name into font files.
+fn resolve_style(style: &StyleChoice, dir: &std::path::Path) -> Style {
+    let size = style.size.clamp(2.0, 400.0);
+    Style {
+        bangla: engine::fonts::bangla_faces(&style.bangla_font, dir),
+        english: engine::fonts::english_face(&style.english_font),
+        size,
+        line_height: style.line_height.filter(|lh| *lh > 0.0).unwrap_or(size * 1.25),
+        bold: style.bold,
+        italic: style.italic,
+        color: style.color,
+        align: style.align,
+    }
 }
 
 #[tauri::command]
@@ -521,6 +526,186 @@ async fn markup_text(
 async fn redact_area(docs: State<'_, Docs>, id: u64, page: i32, rect: [f32; 4]) -> Result<DocInfo, String> {
     let viewer = docs.viewer.clone();
     blocking(move || viewer.edit(id, PageEdit::Redact { page, rect })).await
+}
+
+// ---------------------------------------------------------------------------
+// Create, convert and forms (SRS Modules 7 and 8)
+// ---------------------------------------------------------------------------
+
+/// A new blank PDF, opened in a new tab (not saved until the user saves it).
+#[tauri::command]
+async fn new_blank_pdf(docs: State<'_, Docs>, size: [f32; 2], pages: u32, name: String) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.open_bytes(engine::convert::blank_pdf(size, pages)?, &name)).await
+}
+
+/// One PDF from pictures, one per page, opened in a new tab.
+#[tauri::command]
+async fn pictures_to_pdf(
+    docs: State<'_, Docs>,
+    files: Vec<String>,
+    layout: engine::convert::PictureLayout,
+    name: String,
+) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let files: Vec<PathBuf> = files.into_iter().map(PathBuf::from).collect();
+        viewer.open_bytes(engine::convert::pictures_to_pdf(&files, layout)?, &name)
+    })
+    .await
+}
+
+/// Save pages as PNG or JPG pictures in a folder. Returns the files written.
+#[tauri::command]
+async fn export_pictures(
+    docs: State<'_, Docs>,
+    id: u64,
+    pages: Vec<i32>,
+    dpi: f32,
+    format: engine::convert::PictureFormat,
+    dir: String,
+    stem: String,
+) -> Result<Vec<String>, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let dir = PathBuf::from(dir);
+        let mut written = Vec::new();
+        for page in pages {
+            let list = viewer.page(id, page)?;
+            let bytes = engine::convert::page_picture(&list, dpi, format)?;
+            let path = engine::convert::picture_path(&dir, &stem, page, format);
+            pages::write_file_safely(&path, &bytes)?;
+            written.push(path.to_string_lossy().into_owned());
+        }
+        Ok(written)
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct Sizes {
+    before: u64,
+    after: u64,
+}
+
+/// Save a smaller copy of the document at `dest`.
+#[tauri::command]
+async fn compress_pdf(
+    docs: State<'_, Docs>,
+    id: u64,
+    level: engine::convert::Compression,
+    dest: String,
+) -> Result<Sizes, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let (bytes, password) = viewer.snapshot(id)?;
+        let doc = mupdf::pdf::PdfDocument::from_bytes(&bytes)?;
+        let mut doc = doc;
+        if let Some(pw) = &password {
+            if doc.needs_password()? {
+                doc.authenticate(pw)?;
+            }
+        }
+        let before = pages::to_bytes(&doc, pages::save_options())?.len() as u64;
+        let out = engine::convert::compress(&bytes, password.as_deref(), level)?;
+        pages::write_file_safely(std::path::Path::new(&dest), &out)?;
+        Ok(Sizes { before, after: out.len() as u64 })
+    })
+    .await
+}
+
+/// Save a copy protected with a password (AES-256).
+#[tauri::command]
+async fn protect_pdf(docs: State<'_, Docs>, id: u64, user: String, owner: Option<String>, dest: String) -> Result<(), String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let (bytes, password) = viewer.snapshot(id)?;
+        let out = engine::convert::protect(&bytes, password.as_deref(), &user, owner.as_deref().filter(|o| !o.is_empty()))?;
+        pages::write_file_safely(std::path::Path::new(&dest), &out)
+    })
+    .await
+}
+
+/// Save a copy without the password.
+#[tauri::command]
+async fn unprotect_pdf(docs: State<'_, Docs>, id: u64, dest: String) -> Result<(), String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let (bytes, password) = viewer.snapshot(id)?;
+        let out = engine::convert::unprotect(&bytes, password.as_deref())?;
+        pages::write_file_safely(std::path::Path::new(&dest), &out)
+    })
+    .await
+}
+
+/// Page numbers, header, footer or watermark on many pages.
+#[tauri::command]
+async fn decorate_pages(
+    app: AppHandle,
+    docs: State<'_, Docs>,
+    id: u64,
+    item: engine::textedit::Decoration,
+    style: StyleChoice,
+) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    let dir = fonts_dir(&app);
+    blocking(move || {
+        let style = resolve_style(&style, &dir);
+        viewer.edit(id, PageEdit::Decorate { item, style })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn form_fields(docs: State<'_, Docs>, id: u64, page: i32) -> Result<Vec<engine::forms::FormField>, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.fields(id, page)).await
+}
+
+/// Fill in one form field (Bangla or English).
+#[tauri::command]
+async fn set_field(app: AppHandle, docs: State<'_, Docs>, id: u64, page: i32, xref: i32, value: String) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    let dir = fonts_dir(&app);
+    blocking(move || {
+        let choice = StyleChoice {
+            bangla_font: engine::fonts::default_bangla().name.to_string(),
+            english_font: engine::fonts::SANS.to_string(),
+            size: 10.0,
+            line_height: None,
+            bold: false,
+            italic: false,
+            color: [0, 0, 0],
+            align: Align::Left,
+        };
+        let style = resolve_style(&choice, &dir);
+        viewer.edit(id, PageEdit::SetField { page, xref, value, style })
+    })
+    .await
+}
+
+/// Make the filled form part of the pages.
+#[tauri::command]
+async fn flatten_form(docs: State<'_, Docs>, id: u64) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || viewer.edit(id, PageEdit::Flatten)).await
+}
+
+#[tauri::command]
+fn office_status() -> engine::office::OfficeStatus {
+    engine::office::status()
+}
+
+/// Convert a Word document with LibreOffice or Word, and open the PDF.
+#[tauri::command]
+async fn word_to_pdf(docs: State<'_, Docs>, path: String) -> Result<DocInfo, String> {
+    let viewer = docs.viewer.clone();
+    blocking(move || {
+        let input = PathBuf::from(&path);
+        let name = format!("{}.pdf", input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into()));
+        viewer.open_bytes(engine::office::to_pdf(&input)?, &name)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -572,6 +757,18 @@ pub fn run() {
             place_text,
             markup_text,
             redact_area,
+            new_blank_pdf,
+            pictures_to_pdf,
+            export_pictures,
+            compress_pdf,
+            protect_pdf,
+            unprotect_pdf,
+            decorate_pages,
+            form_fields,
+            set_field,
+            flatten_form,
+            office_status,
+            word_to_pdf,
             recent_files,
             clear_recent_files,
         ])

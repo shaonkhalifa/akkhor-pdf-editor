@@ -4,6 +4,7 @@
 // pages plus one ahead and behind), so a 2,000-page file scrolls as smoothly
 // as a 2-page one.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { message } from "@tauri-apps/plugin-dialog";
 import { PX_PER_PT, searchPdf } from "../api";
 import { num, t } from "../i18n";
 import { deletePages, redo, rotatePages, save, saveAs, undo } from "../pageTools";
@@ -15,6 +16,9 @@ import Sidebar from "./Sidebar";
 import SignatureDialog from "./SignatureDialog";
 import SplitDialog from "./SplitDialog";
 import StampDialog from "./StampDialog";
+import { CompressDialog, DecorateDialog, ExportDialog, PasswordToolDialog } from "./ToolDialogs";
+import { flattenForm } from "../api";
+import { choose } from "./ChoiceDialog";
 import { insertPicture } from "../insertTools";
 import { setTool } from "../textTools";
 import type { Tool } from "../store";
@@ -56,7 +60,25 @@ export default function DocView({ tab }: { tab: Tab }) {
   const [searching, setSearching] = useState(false);
   const [printing, setPrinting] = useState<number | null>(null);
   const [splitting, setSplitting] = useState(false);
-  const [dialog, setDialog] = useState<"signature" | "stamp" | null>(null);
+  const [dialog, setDialog] = useState<"signature" | "stamp" | "export" | "compress" | "password" | "numbers" | "header" | "footer" | "watermark" | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+
+  const flatten = async () => {
+    const answer = await choose({ title: t(lang, "flattenTitle"), message: t(lang, "flattenAsk"), buttons: [t(lang, "flatten"), t(lang, "cancel")] });
+    if (answer !== 0) return;
+    try {
+      useApp.getState().setDoc(await flattenForm(doc.id));
+    } catch (e) {
+      await message(String(e), { kind: "error" });
+    }
+  };
+
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const close = () => setToolsOpen(false);
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [toolsOpen]);
   const setMerge = useApp((s) => s.setMerge);
 
   const maxW = useMemo(() => Math.max(...doc.pages.map((p) => p[0])), [doc.pages]);
@@ -408,6 +430,48 @@ export default function DocView({ tab }: { tab: Tab }) {
           <Icon name="images" size={16} /> {t(lang, "editImages")}
         </button>
         <span className="sep" />
+        <span className="menu-wrap" onPointerDown={(e) => e.stopPropagation()}>
+          <button className={toolsOpen ? "tool text on" : "tool text"} aria-haspopup="menu" aria-expanded={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)}>
+            {t(lang, "toolsMenu")} ▾
+          </button>
+          {toolsOpen && (
+            <div className="dropdown" role="menu">
+              {(
+                [
+                  ["numbers", "pageNumbers"],
+                  ["header", "header"],
+                  ["footer", "footer"],
+                  ["watermark", "watermark"],
+                  ["export", "exportPictures"],
+                  ["compress", "compress"],
+                  ["password", "passwordTool"],
+                ] as const
+              ).map(([id, key]) => (
+                <button
+                  key={id}
+                  role="menuitem"
+                  onClick={() => {
+                    setToolsOpen(false);
+                    setDialog(id);
+                  }}
+                >
+                  {t(lang, key)}…
+                </button>
+              ))}
+              {doc.has_form && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setToolsOpen(false);
+                    flatten();
+                  }}
+                >
+                  {t(lang, "flatten")}…
+                </button>
+              )}
+            </div>
+          )}
+        </span>
         <button className="tool text" onClick={() => setSplitting(true)} title={t(lang, "splitTitle")}>
           <Icon name="split" size={16} /> {t(lang, "split")}
         </button>
@@ -442,6 +506,7 @@ export default function DocView({ tab }: { tab: Tab }) {
                 placing={tab.placing && tab.placing.page === i ? tab.placing : null}
                 tool={tab.tool}
                 editing={tab.editing && tab.editing.page === i ? tab.editing : null}
+                hasForm={doc.has_form}
               />
             ))}
           </div>
@@ -462,6 +527,13 @@ export default function DocView({ tab }: { tab: Tab }) {
       {splitting && <SplitDialog doc={doc} onClose={() => setSplitting(false)} />}
       {dialog === "signature" && <SignatureDialog docId={doc.id} onClose={() => setDialog(null)} />}
       {dialog === "stamp" && <StampDialog docId={doc.id} onClose={() => setDialog(null)} />}
+      {dialog === "export" && <ExportDialog doc={doc} onClose={() => setDialog(null)} />}
+      {dialog === "compress" && <CompressDialog doc={doc} onClose={() => setDialog(null)} />}
+      {dialog === "password" && <PasswordToolDialog doc={doc} onClose={() => setDialog(null)} />}
+      {(dialog === "numbers" || dialog === "header" || dialog === "footer" || dialog === "watermark") && (
+        <DecorateDialog doc={doc} kind={dialog} onClose={() => setDialog(null)} />
+      )}
+      {doc.has_form && tab.tool === "none" && <div className="form-note">{t(lang, "formNote")}</div>}
       {tab.tool !== "none" && !tab.editing && (
         <div className="mode-banner">
           {t(lang, TOOL_BANNERS[tab.tool])}

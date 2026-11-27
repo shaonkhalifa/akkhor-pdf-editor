@@ -22,6 +22,10 @@ export interface DocInfo {
   dirty: boolean;
   can_undo: boolean;
   can_redo: boolean;
+  /** A new document that has never been saved. */
+  untitled: boolean;
+  /** The document has form fields to fill in. */
+  has_form: boolean;
 }
 
 /** A change to the pages of an open document. Page numbers are zero-based. */
@@ -254,3 +258,64 @@ export const markupText = (id: number, page: number, markup: MarkupKind, rect: n
   invoke<DocInfo>("markup_text", { id, page, markup, rect, color });
 
 export const redactArea = (id: number, page: number, rect: number[]) => invoke<DocInfo>("redact_area", { id, page, rect });
+
+// --- Create, convert and forms (Phase 6) --------------------------------------
+
+export type PictureLayout = "fit_picture" | "a4";
+export type PictureFormat = "png" | "jpg";
+export type Compression = "low" | "medium" | "high";
+
+export interface Decoration {
+  text: string;
+  spot: "top" | "bottom" | "middle";
+  margin: number;
+  rotation: number;
+  opacity: number;
+  bangla_digits: boolean;
+  pages: number[];
+  first_number: number;
+}
+
+export interface FormField {
+  xref: number;
+  kind: "text" | "checkbox" | "radio" | "combo" | "list" | "signature" | "button";
+  name: string;
+  value: string;
+  rect: [number, number, number, number];
+  options: [string, string][];
+  on_value: string | null;
+  checked: boolean;
+  readonly: boolean;
+  multiline: boolean;
+}
+
+export const newBlankPdf = (size: [number, number], pages: number, name: string) =>
+  invoke<DocInfo>("new_blank_pdf", { size, pages, name });
+
+export const picturesToPdf = (files: string[], layout: PictureLayout, name: string) =>
+  invoke<DocInfo>("pictures_to_pdf", { files, layout, name });
+
+export const exportPictures = (id: number, pages: number[], dpi: number, format: PictureFormat, dir: string, stem: string) =>
+  invoke<string[]>("export_pictures", { id, pages, dpi, format, dir, stem });
+
+export const compressPdf = (id: number, level: Compression, dest: string) =>
+  invoke<{ before: number; after: number }>("compress_pdf", { id, level, dest });
+
+export const protectPdf = (id: number, user: string, owner: string | null, dest: string) =>
+  invoke<void>("protect_pdf", { id, user, owner, dest });
+
+export const unprotectPdf = (id: number, dest: string) => invoke<void>("unprotect_pdf", { id, dest });
+
+export const decoratePages = (id: number, item: Decoration, style: StyleChoice) =>
+  invoke<DocInfo>("decorate_pages", { id, item, style });
+
+export const formFields = (id: number, page: number) => invoke<FormField[]>("form_fields", { id, page });
+
+export const setField = (id: number, page: number, xref: number, value: string) =>
+  invoke<DocInfo>("set_field", { id, page, xref, value });
+
+export const flattenForm = (id: number) => invoke<DocInfo>("flatten_form", { id });
+
+export const officeStatus = () => invoke<{ libreoffice: boolean; word: boolean }>("office_status");
+
+export const wordToPdf = (path: string) => invoke<DocInfo>("word_to_pdf", { path });
