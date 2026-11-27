@@ -323,7 +323,7 @@ fn font_url(fonts_dir: &Path, file: &str) -> String {
 /// A path for MuPDF: absolute, UTF-8, with forward slashes. MuPDF finds a
 /// file's folder by looking for '/', so a Windows path with '\' would make it
 /// fall back to the current folder, which may not even be readable.
-pub(crate) fn mupdf_path(p: &Path) -> Result<String> {
+pub fn mupdf_path(p: &Path) -> Result<String> {
     let abs = std::path::absolute(p).context("making path absolute")?;
     let s = abs.to_str().context("path is not valid UTF-8")?;
     Ok(s.replace('\\', "/"))

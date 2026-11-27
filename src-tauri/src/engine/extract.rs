@@ -1,8 +1,8 @@
 //! Read text back out of a PDF, line by line, with positions.
 
 use anyhow::{Context, Result};
-use mupdf::text_page::TextPageFlags;
-use mupdf::{Document, Point, Rect};
+use mupdf::text_page::{TextPage, TextPageFlags};
+use mupdf::{DisplayList, Document, Point, Rect};
 
 /// One visual line of text on a page. Coordinates are MuPDF page space:
 /// origin at the top-left of the page, y grows downward, units are points.
@@ -22,10 +22,12 @@ pub fn open_pdf(bytes: &[u8]) -> Result<Document> {
     Document::from_bytes(bytes, "application/pdf").context("opening PDF")
 }
 
-/// Raw MuPDF text lines with the given extraction flags.
-fn raw_lines(doc: &Document, page_no: i32, flags: TextPageFlags) -> Result<Vec<LineInfo>> {
-    let page = doc.load_page(page_no)?;
-    let tp = page.to_text_page(flags)?;
+const TEXT_FLAGS: TextPageFlags = TextPageFlags::PRESERVE_WHITESPACE;
+const GEOMETRY_FLAGS: TextPageFlags =
+    TextPageFlags::PRESERVE_WHITESPACE.union(TextPageFlags::IGNORE_ACTUALTEXT);
+
+/// Visual rows from one MuPDF text page.
+fn rows_of(tp: &TextPage) -> Vec<LineInfo> {
     let mut out = Vec::new();
     for block in tp.blocks() {
         for line in block.lines() {
@@ -47,7 +49,7 @@ fn raw_lines(doc: &Document, page_no: i32, flags: TextPageFlags) -> Result<Vec<L
             }
         }
     }
-    Ok(merge_rows(out))
+    merge_rows(out)
 }
 
 /// Join consecutive fragments that sit on the same baseline into one line.
@@ -79,20 +81,14 @@ fn same_row(a: &LineInfo, b: &LineInfo) -> bool {
     (a.origin.y - b.origin.y).abs() <= tolerance
 }
 
-/// All visual lines on one page, in reading order.
+/// Combine the text pass and the geometry pass, then sort top to bottom.
 ///
-/// Text and geometry come from two passes. With `/ActualText` (how Akkhor
-/// stores shaped Bangla) the text pass gives the right characters but places
-/// them only roughly; the geometry pass ignores ActualText and sees every
-/// glyph where it is really drawn. Rows are matched by baseline.
-pub fn page_lines(doc: &Document, page_no: i32) -> Result<Vec<LineInfo>> {
-    let text_rows = raw_lines(doc, page_no, TextPageFlags::PRESERVE_WHITESPACE)?;
-    let geometry = raw_lines(
-        doc,
-        page_no,
-        TextPageFlags::PRESERVE_WHITESPACE | TextPageFlags::IGNORE_ACTUALTEXT,
-    )?;
-    Ok(text_rows
+/// With `/ActualText` (how Akkhor stores shaped Bangla) the text pass gives
+/// the right characters but places them only roughly; the geometry pass
+/// ignores ActualText and sees every glyph where it is really drawn. Rows are
+/// matched by baseline.
+fn combine(text_rows: Vec<LineInfo>, geometry: Vec<LineInfo>) -> Vec<LineInfo> {
+    let mut rows: Vec<LineInfo> = text_rows
         .into_iter()
         .map(|mut row| {
             if let Some(g) = geometry.iter().find(|g| same_row(g, &row)) {
@@ -102,19 +98,34 @@ pub fn page_lines(doc: &Document, page_no: i32) -> Result<Vec<LineInfo>> {
             }
             row
         })
-        .collect::<Vec<_>>())
-    .map(|mut rows: Vec<LineInfo>| {
-        // Top to bottom, then left to right. Content added later (for
-        // example an edited line) is drawn last but read in its place.
-        rows.sort_by(|a, b| {
-            if same_row(a, b) {
-                a.origin.x.total_cmp(&b.origin.x)
-            } else {
-                a.origin.y.total_cmp(&b.origin.y)
-            }
-        });
-        rows
-    })
+        .collect();
+    // Top to bottom, then left to right. Content added later (for example an
+    // edited line) is drawn last but read in its place.
+    rows.sort_by(|a, b| {
+        if same_row(a, b) {
+            a.origin.x.total_cmp(&b.origin.x)
+        } else {
+            a.origin.y.total_cmp(&b.origin.y)
+        }
+    });
+    rows
+}
+
+/// All visual lines on one page of an open document, in reading order.
+pub fn page_lines(doc: &Document, page_no: i32) -> Result<Vec<LineInfo>> {
+    let page = doc.load_page(page_no)?;
+    Ok(combine(
+        rows_of(&page.to_text_page(TEXT_FLAGS)?),
+        rows_of(&page.to_text_page(GEOMETRY_FLAGS)?),
+    ))
+}
+
+/// All visual lines of a recorded page (safe to call from any thread).
+pub fn display_list_lines(list: &DisplayList) -> Result<Vec<LineInfo>> {
+    Ok(combine(
+        rows_of(&list.to_text_page(TEXT_FLAGS)?),
+        rows_of(&list.to_text_page(GEOMETRY_FLAGS)?),
+    ))
 }
 
 /// Whole-document text: one line per visual line, pages separated by a blank line.

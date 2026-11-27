@@ -8,3 +8,4 @@ pub mod layout;
 pub mod render;
 pub mod script;
 pub mod selftest;
+pub mod viewer;
