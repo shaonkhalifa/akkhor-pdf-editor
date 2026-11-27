@@ -1,6 +1,6 @@
 [package]
 name = "akkhor-pdf-editor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Free, open-source, offline Bangla & English PDF editor"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/shaonkhalifa/akkhor-pdf-editor"
@@ -26,6 +26,7 @@ serde_json = "1"
 mupdf = { version = "0.8.0", default-features = false, features = ["html", "img", "base14-fonts"] }
 anyhow = "1"
 tempfile = "3"
+tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 png = "0.17"

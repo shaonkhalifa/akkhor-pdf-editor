@@ -6,8 +6,20 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Everything happens on your own PC. The app contains **no network code**, so your files never leave your computer.
 - Free forever, licensed under **AGPL-3.0-or-later**.
 
-> **Status: Phase 1 of 8** (project setup, Bangla shaping test and text-edit spike).
-> It is not a usable editor yet. See the [roadmap](#roadmap).
+> **Status: Phase 2 of 8 — a working PDF viewer.** Open, read, zoom, search
+> (Bangla and English), copy text, print and save copies of PDFs. Editing
+> comes in later phases. See the [roadmap](#roadmap).
+
+## What you can do (v0.2)
+
+- Open PDFs with the Open button, Ctrl+O, drag and drop, or the recent files list
+- Open several PDFs in tabs; open password-protected PDFs
+- Scroll smoothly, zoom 25–400%, fit width or fit page, jump to a page
+- Page thumbnails and the PDF's bookmarks in the sidebar; internal links work
+- Search Bangla and English text with highlights (Ctrl+F, Enter / Shift+Enter, F3)
+- Select and copy text as correct Unicode
+- Print (Ctrl+P) with the Windows print dialog; Save As (Ctrl+S)
+- Interface in Bangla or English
 
 ## What Phase 1 proves
 
@@ -94,8 +106,8 @@ scripts/                 helper scripts (no-network check)
 
 ## Roadmap
 
-1. **Setup, shaping test and text-edit spike** ← you are here
-2. PDF viewer and printing
+1. Setup, shaping test and text-edit spike ✅
+2. **PDF viewer and printing** ✅ ← you are here
 3. Page tools (merge, split, rotate, delete, reorder)
 4. Images and signatures
 5. Text editing, Bangla and English (core feature)
