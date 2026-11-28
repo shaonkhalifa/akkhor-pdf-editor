@@ -318,6 +318,27 @@ input[type="text"], input[type="number"], input[type="search"], input[type="pass
 .form-field.choice-field select { width: 100%; height: 100%; border: 1px solid rgba(31, 111, 235, 0.45); background: rgba(232, 240, 254, 0.97); color: #111; padding: 0 2px; font-family: "Segoe UI", "Nirmala UI", sans-serif; }
 .form-note { position: absolute; bottom: 14px; right: 18px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 14px; font-size: 0.82rem; z-index: 8; pointer-events: none; }
 
+/* ---- Image tools (Phase 8A) ---- */
+.image-tools { max-width: 1200px; margin: 0 auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+.image-tools h1 { font-size: 1.3rem; }
+.it-body { display: grid; grid-template-columns: 240px 1fr; gap: 14px; align-items: start; }
+@media (max-width: 760px) { .it-body { grid-template-columns: 1fr; } }
+.it-files { display: flex; flex-direction: column; gap: 8px; }
+.it-files ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }
+.it-files li { display: flex; align-items: center; gap: 4px; }
+.it-file { flex: 1; min-width: 0; text-align: left; border: none; background: none; padding: 6px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.it-file.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.it-main { display: flex; flex-direction: column; gap: 10px; }
+.it-controls { display: flex; flex-direction: column; gap: 6px; }
+.small-btn { padding: 3px 10px; font-size: 0.82rem; }
+.it-previews { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .it-previews { grid-template-columns: 1fr; } }
+.it-previews figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.it-previews img { width: 100%; max-height: 52vh; object-fit: contain; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.it-previews img.checker { background: #fff repeating-conic-gradient(#e6e6e6 0 25%, #fff 0 50%) 0 0 / 18px 18px; }
+.it-previews img.pickable { cursor: crosshair; }
+.it-empty { min-height: 200px; display: grid; place-items: center; border: 1px dashed var(--border); border-radius: 8px; }
+
 /* ---- Printing: only the prepared page images are printed ---- */
 #print-root { display: none; }
 @media print {

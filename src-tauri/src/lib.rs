@@ -760,6 +760,129 @@ async fn ocr_area(docs: State<'_, Docs>, id: u64, page: i32, rect: [f32; 4]) -> 
     blocking(move || viewer.ocr_area(id, page, rect, &ocr_dir()?)).await
 }
 
+// ---------------------------------------------------------------------------
+// Image tools (SRS Module 14)
+// ---------------------------------------------------------------------------
+
+use engine::imagetools::{self, BackgroundJob, ImageJob};
+
+#[derive(Serialize)]
+struct ImageFile {
+    info: imagetools::ImageInfo,
+    /// A small preview, as a data URL.
+    preview: String,
+}
+
+/// Size, format and a preview of a picture file.
+#[tauri::command]
+async fn image_file(path: String) -> Result<ImageFile, String> {
+    blocking(move || {
+        let bytes = std::fs::read(&path)?;
+        let info = imagetools::info(&bytes)?;
+        let small = imagetools::preview(&bytes, 1400)?;
+        Ok(ImageFile { info, preview: picture(&small, 0, 0).data_url })
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct ImageResult {
+    /// A preview of the result, as a data URL.
+    preview: String,
+    width: u32,
+    height: u32,
+    /// Size of the finished file, in bytes.
+    bytes: u64,
+    ext: &'static str,
+}
+
+fn result_of(out: &imagetools::Output) -> anyhow::Result<ImageResult> {
+    let small = imagetools::preview(&out.bytes, 1400)?;
+    Ok(ImageResult { preview: picture(&small, 0, 0).data_url, width: out.width, height: out.height, bytes: out.bytes.len() as u64, ext: out.ext })
+}
+
+/// What resizing/converting would give, without saving.
+#[tauri::command]
+async fn image_preview(path: String, job: ImageJob) -> Result<ImageResult, String> {
+    blocking(move || result_of(&imagetools::process(&std::fs::read(&path)?, &job)?)).await
+}
+
+/// What removing the background would give, without saving.
+#[tauri::command]
+async fn background_preview(path: String, job: BackgroundJob) -> Result<ImageResult, String> {
+    blocking(move || result_of(&imagetools::remove_background(&std::fs::read(&path)?, &job)?)).await
+}
+
+/// The colour at a point of a picture (x, y from 0 to 1), for picking the background.
+#[tauri::command]
+async fn image_color_at(path: String, x: f32, y: f32) -> Result<[u8; 3], String> {
+    blocking(move || {
+        let (img, _) = imagetools::open(&std::fs::read(&path)?)?;
+        let rgba = img.to_rgba8();
+        let px = ((x.clamp(0.0, 1.0) * (rgba.width() - 1) as f32).round()) as u32;
+        let py = ((y.clamp(0.0, 1.0) * (rgba.height() - 1) as f32).round()) as u32;
+        let p = rgba.get_pixel(px, py).0;
+        Ok([p[0], p[1], p[2]])
+    })
+    .await
+}
+
+/// Resize/convert one picture and save it at `dest`.
+#[tauri::command]
+async fn save_image(path: String, job: ImageJob, dest: String) -> Result<ImageResult, String> {
+    blocking(move || {
+        let out = imagetools::process(&std::fs::read(&path)?, &job)?;
+        pages::write_file_safely(std::path::Path::new(&dest), &out.bytes)?;
+        result_of(&out)
+    })
+    .await
+}
+
+/// Remove the background of one picture and save it (PNG) at `dest`.
+#[tauri::command]
+async fn save_background(path: String, job: BackgroundJob, dest: String) -> Result<ImageResult, String> {
+    blocking(move || {
+        let out = imagetools::remove_background(&std::fs::read(&path)?, &job)?;
+        pages::write_file_safely(std::path::Path::new(&dest), &out.bytes)?;
+        result_of(&out)
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct BatchItem {
+    input: String,
+    output: Option<String>,
+    bytes: u64,
+    error: Option<String>,
+}
+
+/// Resize/convert many pictures into `dir`. Files are named
+/// "<name>-<width>x<height>.<ext>"; nothing is overwritten.
+#[tauri::command]
+async fn batch_images(paths: Vec<String>, job: ImageJob, dir: String) -> Result<Vec<BatchItem>, String> {
+    blocking(move || {
+        let dir = PathBuf::from(dir);
+        Ok(paths
+            .into_iter()
+            .map(|p| {
+                let run = || -> anyhow::Result<(String, u64)> {
+                    let out = imagetools::process(&std::fs::read(&p)?, &job)?;
+                    let stem = std::path::Path::new(&p).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "picture".into());
+                    let dest = imagetools::unused_file(&dir, &format!("{stem}-{}x{}", out.width, out.height), out.ext);
+                    pages::write_file_safely(&dest, &out.bytes)?;
+                    Ok((dest.to_string_lossy().into_owned(), out.bytes.len() as u64))
+                };
+                match run() {
+                    Ok((output, bytes)) => BatchItem { input: p, output: Some(output), bytes, error: None },
+                    Err(e) => BatchItem { input: p, output: None, bytes: 0, error: Some(format!("{e:#}")) },
+                }
+            })
+            .collect())
+    })
+    .await
+}
+
 #[tauri::command]
 fn office_status() -> engine::office::OfficeStatus {
     engine::office::status()
@@ -844,6 +967,13 @@ pub fn run() {
             ocr_status,
             ocr_page,
             ocr_area,
+            image_file,
+            image_preview,
+            background_preview,
+            image_color_at,
+            save_image,
+            save_background,
+            batch_images,
             recent_files,
             clear_recent_files,
         ])

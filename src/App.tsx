@@ -5,6 +5,7 @@ import { closePdf } from "./api";
 import ChoiceDialog from "./components/ChoiceDialog";
 import DocView from "./components/DocView";
 import Home from "./components/Home";
+import ImageTools from "./components/ImageTools";
 import MergeDialog from "./components/MergeDialog";
 import PasswordDialog from "./components/PasswordDialog";
 import SelfTest from "./components/SelfTest";
@@ -126,6 +127,8 @@ export default function App() {
       <main className="main">
         {screen === "selftest" ? (
           <SelfTest />
+        ) : screen === "images" ? (
+          <ImageTools />
         ) : screen === "doc" && active ? (
           <DocView key={active.doc.id} tab={active} />
         ) : (

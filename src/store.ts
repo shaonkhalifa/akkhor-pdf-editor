@@ -57,7 +57,7 @@ export interface Editing {
   style: StyleChoice;
 }
 
-export type Screen = "home" | "doc" | "selftest";
+export type Screen = "home" | "doc" | "selftest" | "images";
 
 interface State {
   lang: Lang;
