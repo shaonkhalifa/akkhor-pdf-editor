@@ -345,3 +345,56 @@ export const ocrPage = (id: number, page: number, dpi: number) => invoke<DocInfo
 
 /** Read the text in an area of a page. */
 export const ocrArea = (id: number, page: number, rect: number[]) => invoke<string>("ocr_area", { id, page, rect });
+
+// --- Image tools (Phase 8A) --------------------------------------------------
+
+export type OutFormat = "keep" | "jpg" | "png" | "webp";
+
+export interface ImageJob {
+  resize: "none" | "pixels" | "percent";
+  width: number;
+  height: number;
+  percent: number;
+  keep_aspect: boolean;
+  crop: boolean;
+  format: OutFormat;
+  quality: number;
+  background: [number, number, number];
+  target_kb: number | null;
+}
+
+export interface BackgroundJob {
+  color: [number, number, number] | null;
+  tolerance: number;
+  softness: number;
+  from_edges: boolean;
+  trim: boolean;
+}
+
+export interface ImageFile {
+  info: { width: number; height: number; bytes: number; format: string; has_alpha: boolean };
+  preview: string;
+}
+
+export interface ImageResult {
+  preview: string;
+  width: number;
+  height: number;
+  bytes: number;
+  ext: string;
+}
+
+export interface BatchItem {
+  input: string;
+  output: string | null;
+  bytes: number;
+  error: string | null;
+}
+
+export const imageFile = (path: string) => invoke<ImageFile>("image_file", { path });
+export const imagePreview = (path: string, job: ImageJob) => invoke<ImageResult>("image_preview", { path, job });
+export const backgroundPreview = (path: string, job: BackgroundJob) => invoke<ImageResult>("background_preview", { path, job });
+export const imageColorAt = (path: string, x: number, y: number) => invoke<[number, number, number]>("image_color_at", { path, x, y });
+export const saveImage = (path: string, job: ImageJob, dest: string) => invoke<ImageResult>("save_image", { path, job, dest });
+export const saveBackground = (path: string, job: BackgroundJob, dest: string) => invoke<ImageResult>("save_background", { path, job, dest });
+export const batchImages = (paths: string[], job: ImageJob, dir: string) => invoke<BatchItem[]>("batch_images", { paths, job, dir });

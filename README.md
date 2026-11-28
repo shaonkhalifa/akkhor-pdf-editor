@@ -6,13 +6,24 @@ A **free, open-source, offline** PDF editor for Windows that handles **Bangla an
 - Everything happens on your own PC. The app contains **no network code**, so your files never leave your computer.
 - Free forever, licensed under **AGPL-3.0-or-later**.
 
-> **Status: Phase 7 of 8 — Bijoy to Unicode and OCR.** Old Bijoy (SutonnyMJ)
-> text becomes real Unicode Bangla, and scanned pages become searchable;
-> plus everything from Phases 1–6. See the [roadmap](#roadmap).
+> **Status: Phase 8A — image tools.** Resize, convert and shrink pictures,
+> and remove plain backgrounds; plus everything from Phases 1–7. See the
+> [roadmap](#roadmap).
 
-## What you can do (v0.7)
+## What you can do (v0.8)
 
-### Bijoy to Unicode and OCR (new in v0.7)
+### Image tools (new in v0.8)
+
+On the home screen, **Image tools** works on picture files directly (no PDF needed):
+
+- **Resize** by pixels (keep the shape, or crop to an exact size) or by percent; presets such as passport photo 300×300 and signature 300×80.
+- **Convert** between JPG, PNG and WebP. Choose the JPG quality and the colour behind transparent parts.
+- **Shrink to a file size** ("at most 100 KB") for online application forms: the quality is lowered step by step, then the size if needed — never below 64 pixels.
+- **Many pictures at once**: save them all to a folder (nothing is overwritten).
+- **Remove a plain background** (white wall, paper, one-colour backdrop): picked automatically or by clicking it, with tolerance and soft-edge sliders, keeping same-coloured parts inside the subject, and an option to trim. Saves a transparent PNG.
+- Side-by-side preview with the result's size before saving. Everything runs on your PC; no AI model, no internet.
+
+### Bijoy to Unicode and OCR
 
 - **Bijoy text is found automatically** by its font (SutonnyMJ and other "MJ" fonts) and outlined in orange in Edit text mode.
 - **Convert from Bijoy**: one block in the text editor, or every Bijoy block in the document (More → Convert all Bijoy text to Unicode). The text becomes real Unicode Bangla, so it can be searched, copied and edited. Undo works.
@@ -169,6 +180,7 @@ src-tauri/src/engine/    PDF engine (Rust)
   office.rs              Word to PDF through LibreOffice or Word, if installed
   bijoy.rs               Bijoy (SutonnyMJ) to Unicode (MPL-2.0, from bijoy2unicode)
   ocr.rs                 OCR with Tesseract: searchable pages, read an area
+  imagetools.rs          resize, convert, target file size, plain background remover
 ocr-pack/                the separate OCR language pack installer (NSIS)
   edit.rs                replace text in an existing PDF (spike)
   render.rs              page → PNG
@@ -186,7 +198,8 @@ scripts/                 helper scripts (no-network check)
 4. Images and signatures ✅
 5. Text editing, Bangla and English (core feature) ✅
 6. Create, convert and forms ✅
-7. **Bijoy → Unicode and OCR** ✅ ← you are here
+7. Bijoy → Unicode and OCR ✅
+8A. **Image tools (resize, convert, background remover)** ✅ ← you are here
 8. (Later) Digital certificate signatures
 
 ## Contributing

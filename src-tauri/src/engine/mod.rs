@@ -8,6 +8,7 @@ pub mod extract;
 pub mod fonts;
 pub mod forms;
 pub mod images;
+pub mod imagetools;
 pub mod layout;
 pub mod ocr;
 pub mod office;

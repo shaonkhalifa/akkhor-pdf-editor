@@ -75,6 +75,9 @@ export default function Home({ dragging }: { dragging: boolean }) {
             >
               <Icon name="insert" size={16} /> {converting ? t(lang, "working") : t(lang, "wordToPdf")}
             </button>
+            <button onClick={() => setScreen("images")}>
+              <Icon name="picture" size={16} /> {t(lang, "imageTools")}
+            </button>
           </div>
           <p className="muted">{dragging ? t(lang, "dropNow") : t(lang, "dropHint")}</p>
           <p className="muted small">{t(lang, "shortcuts")}</p>
